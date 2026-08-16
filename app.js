@@ -23,7 +23,7 @@ app.get("/", (req, res) => {
 // ===============================
 
 // POST - Add a new player
-app.post("/players", async (req, res) => {
+app.post("/api/players", async (req, res) => {
   try {
     const player = new Player(req.body);
 
@@ -44,7 +44,7 @@ app.post("/players", async (req, res) => {
 });
 
 // GET - Get All Players
-app.get("/players", async (req, res) => {
+app.get("/api/players", async (req, res) => {
   try {
     const players = await Player.find().sort({ createdAt: -1 });
 
@@ -58,7 +58,7 @@ app.get("/players", async (req, res) => {
 });
 
 // POST - Add a new Schedule
-app.post("/schedule", async (req, res) => {
+app.post("/api/schedule", async (req, res) => {
   try {
     const schedule = new Schedule(req.body);
 
@@ -79,7 +79,7 @@ app.post("/schedule", async (req, res) => {
 });
 
 // GET - Get All Schedules
-app.get("/schedules", async (req, res) => {
+app.get("/api/schedules", async (req, res) => {
   try {
     const schedules = await Schedule.find().sort({ createdAt: -1 });
 
