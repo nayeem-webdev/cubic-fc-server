@@ -8,12 +8,6 @@ const scheduleSchema = new Schema(
       trim: true,
     },
 
-    address: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-
     date: {
       type: String,
       default: "",
