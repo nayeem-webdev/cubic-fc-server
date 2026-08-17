@@ -81,7 +81,14 @@ app.post("/api/schedule", async (req, res) => {
 // GET - Get All Schedules
 app.get("/api/schedules", async (req, res) => {
   try {
-    const schedules = await Schedule.find().sort({ createdAt: -1 });
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const schedules = await Schedule.find({
+      date: {
+        $gte: today.toISOString().split("T")[0],
+      },
+    }).sort({ date: 1 });
 
     res.status(200).json(schedules);
   } catch (error) {
