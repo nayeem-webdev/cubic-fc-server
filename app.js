@@ -101,6 +101,43 @@ app.get("/api/schedules", async (req, res) => {
   }
 });
 
+// POST - Register Team
+app.post("/api/teams", async (req, res) => {
+  try {
+    const team = new Team(req.body);
+
+    const savedTeam = await team.save();
+
+    res.status(201).json({
+      message: "Team registered successfully",
+      team: savedTeam,
+    });
+  } catch (error) {
+    console.error("Error registering team:", error.message);
+
+    res.status(400).json({
+      message: "Failed to register team",
+      error: error.message,
+    });
+  }
+});
+
+// GET - Get All Teams
+app.get("/api/teams", async (req, res) => {
+  try {
+    const teams = await Team.find().populate("captain").sort({ createdAt: -1 });
+
+    res.status(200).json(teams);
+  } catch (error) {
+    console.error("Error getting teams:", error.message);
+
+    res.status(500).json({
+      message: "Failed to get teams",
+      error: error.message,
+    });
+  }
+});
+
 // ===============================
 // CONNECT TO MONGODB
 // ===============================
