@@ -5,6 +5,7 @@ import cors from "cors";
 import mongoose from "mongoose";
 import Player from "./models/Player.js";
 import Schedule from "./models/Schedule.js";
+import Team from "./models/Team.js";
 
 const app = express();
 
