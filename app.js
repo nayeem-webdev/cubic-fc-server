@@ -126,7 +126,9 @@ app.post("/api/teams", async (req, res) => {
 // GET - Get All Teams
 app.get("/api/teams", async (req, res) => {
   try {
-    const teams = await Team.find().populate("captain").sort({ createdAt: -1 });
+    const teams = await Team.find()
+      .populate("captain", "name position jerseyNumber photo")
+      .sort({ createdAt: -1 });
 
     res.status(200).json(teams);
   } catch (error) {
