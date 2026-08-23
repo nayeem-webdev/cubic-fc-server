@@ -6,6 +6,8 @@ import mongoose from "mongoose";
 import Player from "./models/Player.js";
 import Schedule from "./models/Schedule.js";
 import Team from "./models/Team.js";
+import Match from "./models/Match.js";
+import { getUpcomingMatches } from "./controllers/matchController.js";
 
 const app = express();
 
@@ -82,12 +84,13 @@ app.post("/api/schedule", async (req, res) => {
 // GET - Get All Schedules
 app.get("/api/schedules", async (req, res) => {
   try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Dhaka",
+    }).format(new Date());
 
     const schedules = await Schedule.find({
       date: {
-        $gte: today.toISOString().split("T")[0],
+        $gte: today,
       },
     }).sort({ date: 1 });
 
@@ -101,7 +104,6 @@ app.get("/api/schedules", async (req, res) => {
     });
   }
 });
-
 // POST - Register Team
 app.post("/api/teams", async (req, res) => {
   try {
@@ -140,6 +142,30 @@ app.get("/api/teams", async (req, res) => {
     });
   }
 });
+
+// POST - Add a new Match
+app.post("/api/matches", async (req, res) => {
+  try {
+    const match = new Match(req.body);
+
+    const savedMatch = await match.save();
+
+    res.status(201).json({
+      message: "Match created successfully",
+      match: savedMatch,
+    });
+  } catch (error) {
+    console.error("Error creating match:", error.message);
+
+    res.status(400).json({
+      message: "Failed to create match",
+      error: error.message,
+    });
+  }
+});
+
+// GET - All Upcoming Matches
+app.get("/api/matches", getUpcomingMatches);
 
 // ===============================
 // CONNECT TO MONGODB
