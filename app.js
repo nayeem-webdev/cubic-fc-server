@@ -7,6 +7,8 @@ import Player from "./models/Player.js";
 import Schedule from "./models/Schedule.js";
 import Team from "./models/Team.js";
 import Match from "./models/Match.js";
+import Venue from "./models/Venue.js";
+
 import { getUpcomingMatches } from "./controllers/matchController.js";
 
 const app = express();
@@ -84,26 +86,78 @@ app.post("/api/schedule", async (req, res) => {
 // GET - Get All Schedules
 app.get("/api/schedules", async (req, res) => {
   try {
-    const today = new Intl.DateTimeFormat("en-CA", {
+    const schedules = await Schedule.find().populate("venue").sort({ date: 1 });
+
+    const todayBD = new Intl.DateTimeFormat("en-CA", {
       timeZone: "Asia/Dhaka",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
     }).format(new Date());
 
-    const schedules = await Schedule.find({
-      date: {
-        $gte: today,
-      },
-    }).sort({ date: 1 });
+    const filteredSchedules = schedules.filter((schedule) => {
+      return schedule.date >= todayBD;
+    });
 
-    res.status(200).json(schedules);
+    res.status(200).json(filteredSchedules);
   } catch (error) {
-    console.error("Error getting schedules:", error.message);
+    console.error("Error fetching schedules:", error);
 
     res.status(500).json({
-      message: "Failed to get schedules",
+      message: "Failed to fetch schedules",
       error: error.message,
     });
   }
 });
+
+// POST /api/venues
+app.post("/api/venues", async (req, res) => {
+  try {
+    const { venue, direction } = req.body;
+
+    if (!venue || !direction) {
+      return res.status(400).json({
+        message: "Venue and direction are required",
+      });
+    }
+
+    const newVenue = new Venue({
+      venue,
+      direction,
+    });
+
+    const savedVenue = await newVenue.save();
+
+    res.status(201).json({
+      message: "Venue added successfully",
+      venue: savedVenue,
+    });
+  } catch (error) {
+    console.error("Error adding venue:", error);
+
+    res.status(400).json({
+      message: "Failed to add venue",
+      error: error.message,
+    });
+  }
+});
+
+// GET /api/venues
+app.get("/api/venues", async (req, res) => {
+  try {
+    const venues = await Venue.find().sort({ venue: 1 });
+
+    res.status(200).json(venues);
+  } catch (error) {
+    console.error("Error fetching venues:", error);
+
+    res.status(500).json({
+      message: "Failed to fetch venues",
+      error: error.message,
+    });
+  }
+});
+
 // POST - Register Team
 app.post("/api/teams", async (req, res) => {
   try {

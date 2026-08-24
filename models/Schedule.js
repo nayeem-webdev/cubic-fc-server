@@ -3,9 +3,9 @@ import { Schema, model } from "mongoose";
 const scheduleSchema = new Schema(
   {
     venue: {
-      type: String,
+      type: Schema.Types.ObjectId,
+      ref: "Venue",
       required: true,
-      trim: true,
     },
 
     date: {
@@ -19,7 +19,13 @@ const scheduleSchema = new Schema(
       trim: true,
     },
 
-    direction: {
+    matchFormat: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    matchType: {
       type: String,
       required: true,
       trim: true,
