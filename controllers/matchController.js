@@ -26,10 +26,10 @@ const getUpcomingMatches = async (req, res) => {
           select: "_id venue",
         },
       })
-      .populate("homeStartingPlayers", "_id name jerseyNumber position")
-      .populate("homeSubstitutes", "_id name jerseyNumber position")
-      .populate("awayStartingPlayers", "_id name jerseyNumber position")
-      .populate("awaySubstitutes", "_id name jerseyNumber position")
+      .populate("homeStartingPlayers", "_id name photo jerseyNumber position")
+      .populate("homeSubstitutes", "_id name photo jerseyNumber position")
+      .populate("awayStartingPlayers", "_id name photo jerseyNumber position")
+      .populate("awaySubstitutes", "_id name photo jerseyNumber position")
       .sort({ matchSchedule: 1 });
 
     res.json({
