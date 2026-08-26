@@ -1,4 +1,3 @@
-import Schedule from "../models/Schedule.js";
 import Match from "../models/Match.js";
 
 const getUpcomingMatches = async (req, res) => {
@@ -6,47 +5,34 @@ const getUpcomingMatches = async (req, res) => {
     const today = new Intl.DateTimeFormat("en-CA", {
       timeZone: "Asia/Dhaka",
     }).format(new Date());
-    // Get today's and future schedules
-    const schedules = await Schedule.find({
-      date: { $gte: today },
-    }).select("_id venue date time");
 
-    const scheduleIds = schedules.map((schedule) => schedule._id);
+    // Get IDs of today's and upcoming schedules
+    const scheduleIds = await Match.db
+      .model("Schedule")
+      .find({ date: { $gte: today } })
+      .distinct("_id");
 
-    // Get matches belonging to those schedules
+    // Get today's and upcoming matches
     const matches = await Match.find({
       matchSchedule: { $in: scheduleIds },
     })
-      .populate({
-        path: "homeTeam",
-        select: "_id name logoLow",
-      })
-      .populate({
-        path: "awayTeam",
-        select: "_id name logoLow",
-      })
+      .populate("homeTeam", "_id name logoLow")
+      .populate("awayTeam", "_id name logoLow")
       .populate({
         path: "matchSchedule",
-        select: "_id venue date time",
+        select: "_id venue date time matchFormat matchType",
+        populate: {
+          path: "venue",
+          select: "_id venue",
+        },
       })
-      .populate({
-        path: "homeStartingPlayers",
-        select: "_id name jerseyNumber position",
-      })
-      .populate({
-        path: "homeSubstitutes",
-        select: "_id name jerseyNumber position",
-      })
-      .populate({
-        path: "awayStartingPlayers",
-        select: "_id name jerseyNumber position",
-      })
-      .populate({
-        path: "awaySubstitutes",
-        select: "_id name jerseyNumber position",
-      });
+      .populate("homeStartingPlayers", "_id name jerseyNumber position")
+      .populate("homeSubstitutes", "_id name jerseyNumber position")
+      .populate("awayStartingPlayers", "_id name jerseyNumber position")
+      .populate("awaySubstitutes", "_id name jerseyNumber position")
+      .sort({ matchSchedule: 1 });
 
-    res.status(200).json({
+    res.json({
       success: true,
       count: matches.length,
       matches,

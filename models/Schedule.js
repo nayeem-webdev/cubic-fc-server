@@ -10,7 +10,8 @@ const scheduleSchema = new Schema(
 
     date: {
       type: String,
-      default: "",
+      required: true,
+      trim: true,
     },
 
     time: {
@@ -36,4 +37,6 @@ const scheduleSchema = new Schema(
   },
 );
 
-export default model("Schedule", scheduleSchema);
+const Schedule = model("Schedule", scheduleSchema);
+
+export default Schedule;
