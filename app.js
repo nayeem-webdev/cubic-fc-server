@@ -3,6 +3,7 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import mongoose from "mongoose";
+
 import Player from "./models/Player.js";
 import Schedule from "./models/Schedule.js";
 import Team from "./models/Team.js";
@@ -11,6 +12,8 @@ import Venue from "./models/Venue.js";
 import Score from "./models/Score.js";
 
 import { getUpcomingMatches } from "./controllers/matchController.js";
+import { adminLogin } from "./controllers/authController.js";
+import { adminAuth } from "./middleware/adminAuth.js";
 
 const app = express();
 
@@ -28,8 +31,10 @@ app.get("/", (req, res) => {
 // PLAYER API
 // ===============================
 
+app.post("/api/auth/login", adminLogin);
+
 // POST - Add a new player
-app.post("/api/players", async (req, res) => {
+app.post("/api/players", adminAuth, async (req, res) => {
   try {
     const player = new Player(req.body);
 
@@ -63,8 +68,33 @@ app.get("/api/players", async (req, res) => {
   }
 });
 
+// UPDATE - Update Player
+app.patch("/api/players/:id", adminAuth, async (req, res) => {
+  try {
+    const player = await Player.findByIdAndUpdate(req.params.id, req.body, {
+      new: true,
+      runValidators: true,
+    });
+
+    if (!player) {
+      return res.status(404).json({
+        message: "Player not found",
+      });
+    }
+
+    res.status(200).json(player);
+  } catch (error) {
+    console.error("Error updating player:", error);
+
+    res.status(500).json({
+      message: "Failed to update player",
+      error: error.message,
+    });
+  }
+});
+
 // POST - Add a new Schedule
-app.post("/api/schedule", async (req, res) => {
+app.post("/api/schedule", adminAuth, async (req, res) => {
   try {
     const schedule = new Schedule(req.body);
 
@@ -112,7 +142,7 @@ app.get("/api/schedules", async (req, res) => {
 });
 
 // POST /api/venues
-app.post("/api/venues", async (req, res) => {
+app.post("/api/venues", adminAuth, async (req, res) => {
   try {
     const { venue, direction } = req.body;
 
@@ -160,7 +190,7 @@ app.get("/api/venues", async (req, res) => {
 });
 
 // POST - Register Team
-app.post("/api/teams", async (req, res) => {
+app.post("/api/teams", adminAuth, async (req, res) => {
   try {
     const team = new Team(req.body);
 
@@ -199,7 +229,7 @@ app.get("/api/teams", async (req, res) => {
 });
 
 // POST - Add a new Match
-app.post("/api/matches", async (req, res) => {
+app.post("/api/matches", adminAuth, async (req, res) => {
   try {
     const match = new Match(req.body);
 
@@ -223,7 +253,7 @@ app.post("/api/matches", async (req, res) => {
 app.get("/api/matches", getUpcomingMatches);
 
 // POST - Save completed match score
-app.post("/api/scores", async (req, res) => {
+app.post("/api/scores", adminAuth, async (req, res) => {
   try {
     const {
       match,
