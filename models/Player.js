@@ -31,13 +31,9 @@ const playerSchema = new Schema(
     },
 
     playsFor: {
-      type: String,
+      type: Schema.Types.ObjectId,
+      ref: "Club",
       required: true,
-    },
-
-    clubLogo: {
-      type: String,
-      default: "",
     },
 
     dateOfBirth: {

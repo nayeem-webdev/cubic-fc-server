@@ -13,6 +13,7 @@ import Score from "./models/Score.js";
 
 import { getUpcomingMatches } from "./controllers/matchController.js";
 import { adminLogin } from "./controllers/authController.js";
+import { getPlayers } from "./controllers/playerController.js";
 
 const app = express();
 
@@ -54,18 +55,7 @@ app.post("/api/players", async (req, res) => {
 });
 
 // GET - Get All Players
-app.get("/api/players", async (req, res) => {
-  try {
-    const players = await Player.find().sort({ createdAt: -1 });
-
-    res.status(200).json(players);
-  } catch (error) {
-    res.status(500).json({
-      message: "Failed to get players",
-      error: error.message,
-    });
-  }
-});
+app.get("/api/players", getPlayers);
 
 // UPDATE - Update Player
 app.patch("/api/players/:id", async (req, res) => {
@@ -117,7 +107,6 @@ app.post("/api/schedule", async (req, res) => {
 app.get("/api/schedules", async (req, res) => {
   try {
     const schedules = await Schedule.find().populate("venue").sort({ date: 1 });
-    /*
     const todayBD = new Intl.DateTimeFormat("en-CA", {
       timeZone: "Asia/Dhaka",
       year: "numeric",
@@ -129,9 +118,6 @@ app.get("/api/schedules", async (req, res) => {
       return schedule.date >= todayBD;
     });
     res.status(200).json(filteredSchedules);
-    */
-
-    res.status(200).json(schedules);
   } catch (error) {
     console.error("Error fetching schedules:", error);
 
