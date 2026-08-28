@@ -2,8 +2,20 @@ import Match from "../models/Match.js";
 
 const getUpcomingMatches = async (req, res) => {
   try {
-    // Get ALL matches for testing
-    const matches = await Match.find()
+    const today = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Dhaka",
+    }).format(new Date());
+
+    // Get IDs of today's and upcoming schedules
+    const scheduleIds = await Match.db
+      .model("Schedule")
+      .find({ date: { $gte: today } })
+      .distinct("_id");
+
+    // Get today's and upcoming matches
+    const matches = await Match.find({
+      matchSchedule: { $in: scheduleIds },
+    })
       .populate("homeTeam", "_id name logoLow")
       .populate("awayTeam", "_id name logoLow")
       .populate({
@@ -26,11 +38,11 @@ const getUpcomingMatches = async (req, res) => {
       matches,
     });
   } catch (error) {
-    console.error("Error fetching matches:", error);
+    console.error("Error fetching upcoming matches:", error);
 
     res.status(500).json({
       success: false,
-      message: "Failed to fetch matches",
+      message: "Failed to fetch upcoming matches",
       error: error.message,
     });
   }

@@ -13,7 +13,6 @@ import Score from "./models/Score.js";
 
 import { getUpcomingMatches } from "./controllers/matchController.js";
 import { adminLogin } from "./controllers/authController.js";
-import { adminAuth } from "./middleware/adminAuth.js";
 
 const app = express();
 
@@ -34,7 +33,7 @@ app.get("/", (req, res) => {
 app.post("/api/auth/login", adminLogin);
 
 // POST - Add a new player
-app.post("/api/players", adminAuth, async (req, res) => {
+app.post("/api/players", async (req, res) => {
   try {
     const player = new Player(req.body);
 
@@ -69,7 +68,7 @@ app.get("/api/players", async (req, res) => {
 });
 
 // UPDATE - Update Player
-app.patch("/api/players/:id", adminAuth, async (req, res) => {
+app.patch("/api/players/:id", async (req, res) => {
   try {
     const player = await Player.findByIdAndUpdate(req.params.id, req.body, {
       new: true,
@@ -94,7 +93,7 @@ app.patch("/api/players/:id", adminAuth, async (req, res) => {
 });
 
 // POST - Add a new Schedule
-app.post("/api/schedule", adminAuth, async (req, res) => {
+app.post("/api/schedule", async (req, res) => {
   try {
     const schedule = new Schedule(req.body);
 
@@ -118,7 +117,7 @@ app.post("/api/schedule", adminAuth, async (req, res) => {
 app.get("/api/schedules", async (req, res) => {
   try {
     const schedules = await Schedule.find().populate("venue").sort({ date: 1 });
-
+    /*
     const todayBD = new Intl.DateTimeFormat("en-CA", {
       timeZone: "Asia/Dhaka",
       year: "numeric",
@@ -129,8 +128,10 @@ app.get("/api/schedules", async (req, res) => {
     const filteredSchedules = schedules.filter((schedule) => {
       return schedule.date >= todayBD;
     });
-
     res.status(200).json(filteredSchedules);
+    */
+
+    res.status(200).json(schedules);
   } catch (error) {
     console.error("Error fetching schedules:", error);
 
@@ -142,7 +143,7 @@ app.get("/api/schedules", async (req, res) => {
 });
 
 // POST /api/venues
-app.post("/api/venues", adminAuth, async (req, res) => {
+app.post("/api/venues", async (req, res) => {
   try {
     const { venue, direction } = req.body;
 
@@ -190,7 +191,7 @@ app.get("/api/venues", async (req, res) => {
 });
 
 // POST - Register Team
-app.post("/api/teams", adminAuth, async (req, res) => {
+app.post("/api/teams", async (req, res) => {
   try {
     const team = new Team(req.body);
 
@@ -229,7 +230,7 @@ app.get("/api/teams", async (req, res) => {
 });
 
 // POST - Add a new Match
-app.post("/api/matches", adminAuth, async (req, res) => {
+app.post("/api/matches", async (req, res) => {
   try {
     const match = new Match(req.body);
 
@@ -253,7 +254,7 @@ app.post("/api/matches", adminAuth, async (req, res) => {
 app.get("/api/matches", getUpcomingMatches);
 
 // POST - Save completed match score
-app.post("/api/scores", adminAuth, async (req, res) => {
+app.post("/api/scores", async (req, res) => {
   try {
     const {
       match,
