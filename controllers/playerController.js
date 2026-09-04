@@ -1,6 +1,11 @@
 import Player from "../models/Player.js";
 import Score from "../models/Score.js";
 import Team from "../models/Team.js";
+import Match from "../models/Match.js";
+
+// ============================================================
+// UPDATE PLAYER
+// ============================================================
 
 const updatePlayer = async (req, res) => {
   try {
@@ -26,43 +31,101 @@ const updatePlayer = async (req, res) => {
   }
 };
 
+// ============================================================
+// DEFENSIVE POINT CALCULATORS
+// ============================================================
+
+// GK - Maximum 10 points
+const getGKPoints = (goalsConceded) => {
+  if (goalsConceded <= 0) return 8;
+  if (goalsConceded <= 2) return 6;
+  if (goalsConceded <= 4) return 4;
+  if (goalsConceded <= 6) return 2;
+  return 0;
+};
+
+// DF - Maximum 5 points
+const getDefenderPoints = (goalsConceded) => {
+  if (goalsConceded <= 0) return 5;
+  if (goalsConceded === 1) return 4.5;
+  if (goalsConceded === 2) return 4;
+  if (goalsConceded === 3) return 3.5;
+  if (goalsConceded === 4) return 3;
+  if (goalsConceded === 5) return 2.5;
+  if (goalsConceded === 6) return 2;
+  if (goalsConceded === 7) return 1.5;
+  if (goalsConceded === 8) return 1;
+  return 0;
+};
+
+// ============================================================
+// GET ALL PLAYERS WITH TEAM + STATISTICS
+// ============================================================
+
 const getPlayers = async (req, res) => {
-  // GET - Get All Players with Team + Statistics
   try {
-    // --------------------------------------------------
+    // --------------------------------------------------------
     // 1. GET PLAYERS
-    // --------------------------------------------------
+    // --------------------------------------------------------
 
     const players = await Player.find().sort({ createdAt: -1 }).lean();
 
-    // --------------------------------------------------
+    // --------------------------------------------------------
     // 2. GET TEAMS
-    // --------------------------------------------------
+    // --------------------------------------------------------
 
     const teams = await Team.find().select("_id name logoLow").lean();
 
-    // Create quick team lookup
     const teamMap = new Map(teams.map((team) => [team._id.toString(), team]));
 
-    // --------------------------------------------------
-    // 3. GET SCORES / MATCHES
-    // --------------------------------------------------
+    // --------------------------------------------------------
+    // 3. GET MATCHES
+    //
+    // Starting players and substitutes now come from MATCH,
+    // not SCORE.
+    // --------------------------------------------------------
 
-    const scores = await Score.find()
+    const matches = await Match.find()
       .select(
-        "homeTeam " +
+        "_id " +
+          "homeTeam " +
           "awayTeam " +
           "homeStartingPlayers " +
           "homeSubstitutes " +
           "awayStartingPlayers " +
-          "awaySubstitutes " +
+          "awaySubstitutes",
+      )
+      .lean();
+
+    // Quick Match lookup
+    const matchMap = new Map(
+      matches.map((match) => [match._id.toString(), match]),
+    );
+
+    // --------------------------------------------------------
+    // 4. GET SCORES
+    //
+    // Score contains:
+    // - match
+    // - homeScore
+    // - awayScore
+    // - matchEvents
+    // --------------------------------------------------------
+
+    const scores = await Score.find()
+      .select(
+        "match " +
+          "homeTeam " +
+          "awayTeam " +
+          "homeScore " +
+          "awayScore " +
           "matchEvents",
       )
       .lean();
 
-    // --------------------------------------------------
-    // 4. INITIALIZE PLAYER STATISTICS
-    // --------------------------------------------------
+    // --------------------------------------------------------
+    // 5. INITIALIZE PLAYER STATISTICS
+    // --------------------------------------------------------
 
     const playerStats = new Map();
 
@@ -81,76 +144,157 @@ const getPlayers = async (req, res) => {
         yellowCards: 0,
         redCards: 0,
 
-        playerRating: 0,
+        // Total defensive points accumulated
+        // across all matches
+        defensivePoints: 0,
+
+        // Final total points
+        playerScore: 0,
       });
     });
 
-    // --------------------------------------------------
-    // 5. PROCESS EVERY MATCH
-    // --------------------------------------------------
+    // --------------------------------------------------------
+    // 6. PROCESS EVERY SCORE / MATCH
+    // --------------------------------------------------------
 
     scores.forEach((score) => {
-      // ------------------------------------------------
-      // ALL PLAYERS WHO WERE LISTED FOR THE MATCH
-      // ------------------------------------------------
-      //
-      // Starting players + substitutes
-      //
-      // Everyone listed gets:
-      // +1 appearance
-      // +0.5 rating
-      //
-      // We intentionally DO NOT check whether a
-      // substitute actually entered the match.
-      // ------------------------------------------------
+      const matchId = score.match?.toString();
 
-      const matchPlayers = [
-        ...(score.homeStartingPlayers || []),
-        ...(score.homeSubstitutes || []),
-        ...(score.awayStartingPlayers || []),
-        ...(score.awaySubstitutes || []),
+      if (!matchId) {
+        return;
+      }
+
+      const match = matchMap.get(matchId);
+
+      // Score exists but corresponding Match does not
+      if (!match) {
+        return;
+      }
+
+      const homePlayers = [
+        ...(match.homeStartingPlayers || []),
+        ...(match.homeSubstitutes || []),
       ];
 
-      // Prevent duplicate appearance if a player
-      // somehow appears twice in the same match.
-      const uniqueMatchPlayers = new Set();
+      const awayPlayers = [
+        ...(match.awayStartingPlayers || []),
+        ...(match.awaySubstitutes || []),
+      ];
 
-      matchPlayers.forEach((player) => {
-        const playerId = player?._id?.toString();
+      // ------------------------------------------------------
+      // HOME TEAM PLAYERS
+      // ------------------------------------------------------
 
-        if (!playerId) {
+      const homeUniquePlayers = new Set();
+
+      homePlayers.forEach((playerId) => {
+        const id = playerId?._id
+          ? playerId._id.toString()
+          : playerId?.toString();
+
+        if (!id) {
           return;
         }
 
-        if (!playerStats.has(playerId)) {
+        if (!playerStats.has(id)) {
           return;
         }
 
-        // Don't count the same player twice
-        // in the same match.
-        if (uniqueMatchPlayers.has(playerId)) {
+        if (homeUniquePlayers.has(id)) {
           return;
         }
 
-        uniqueMatchPlayers.add(playerId);
+        homeUniquePlayers.add(id);
 
-        const stats = playerStats.get(playerId);
+        const stats = playerStats.get(id);
 
+        // Appearance
         stats.appearances += 1;
+
+        // -----------------------------------------------
+        // DEFENSIVE POINTS
+        // -----------------------------------------------
+
+        const player = players.find((p) => p._id.toString() === id);
+
+        if (!player) {
+          return;
+        }
+
+        const goalsConceded = Number(score.awayScore || 0);
+
+        if (player.position === "GK") {
+          stats.defensivePoints += getGKPoints(goalsConceded);
+        }
+
+        if (player.position === "DF") {
+          stats.defensivePoints += getDefenderPoints(goalsConceded);
+        }
       });
 
-      // ------------------------------------------------
-      // MATCH EVENTS
-      // ------------------------------------------------
+      // ------------------------------------------------------
+      // AWAY TEAM PLAYERS
+      // ------------------------------------------------------
+
+      const awayUniquePlayers = new Set();
+
+      awayPlayers.forEach((playerId) => {
+        const id = playerId?._id
+          ? playerId._id.toString()
+          : playerId?.toString();
+
+        if (!id) {
+          return;
+        }
+
+        if (!playerStats.has(id)) {
+          return;
+        }
+
+        if (awayUniquePlayers.has(id)) {
+          return;
+        }
+
+        awayUniquePlayers.add(id);
+
+        const stats = playerStats.get(id);
+
+        // Appearance
+        stats.appearances += 1;
+
+        // -----------------------------------------------
+        // DEFENSIVE POINTS
+        // -----------------------------------------------
+
+        const player = players.find((p) => p._id.toString() === id);
+
+        if (!player) {
+          return;
+        }
+
+        const goalsConceded = Number(score.homeScore || 0);
+
+        if (player.position === "GK") {
+          stats.defensivePoints += getGKPoints(goalsConceded);
+        }
+
+        if (player.position === "DF") {
+          stats.defensivePoints += getDefenderPoints(goalsConceded);
+        }
+      });
+
+      // ------------------------------------------------------
+      // 7. PROCESS MATCH EVENTS
+      // ------------------------------------------------------
 
       (score.matchEvents || []).forEach((event) => {
         const scorerId = event.scorer?.toString();
         const assisterId = event.assister?.toString();
         const playerId = event.player?.toString();
 
-        // ==============================================
+        // ====================================================
         // REGULAR GOAL
-        // ==============================================
+        // ====================================================
 
         if (event.type === "goal") {
           // Goal scorer
@@ -169,9 +313,9 @@ const getPlayers = async (req, res) => {
           }
         }
 
-        // ==============================================
+        // ====================================================
         // PENALTY GOAL
-        // ==============================================
+        // ====================================================
 
         if (event.type === "penalty") {
           if (scorerId && playerStats.has(scorerId)) {
@@ -181,14 +325,16 @@ const getPlayers = async (req, res) => {
             stats.penaltyGoals += 1;
           }
 
-          // No assist is counted for penalty goals
-          // because your event structure doesn't provide
-          // an assister for penalties.
+          // No assist for penalty
         }
 
-        // ==============================================
+        // ====================================================
         // OWN GOAL
-        // ==============================================
+        //
+        // Own goal:
+        // - +1 own goal statistic
+        // - -1 point
+        // ====================================================
 
         if (event.type === "ownGoal") {
           if (scorerId && playerStats.has(scorerId)) {
@@ -196,19 +342,14 @@ const getPlayers = async (req, res) => {
 
             stats.ownGoals += 1;
           }
-
-          // IMPORTANT:
-          //
-          // Own goal does NOT increase:
-          // - goals
-          // - regularGoals
-          // - penaltyGoals
-          // - rating
         }
 
-        // ==============================================
+        // ====================================================
         // CARD
-        // ==============================================
+        //
+        // Yellow = -2
+        // Red = -2
+        // ====================================================
 
         if (event.type === "card") {
           if (playerId && playerStats.has(playerId)) {
@@ -226,54 +367,75 @@ const getPlayers = async (req, res) => {
       });
     });
 
-    // --------------------------------------------------
-    // 6. BUILD FINAL PLAYER RESPONSE
-    // --------------------------------------------------
+    // --------------------------------------------------------
+    // 8. BUILD FINAL PLAYER RESPONSE
+    // --------------------------------------------------------
 
     const result = players.map((player) => {
       const playerId = player._id.toString();
 
       const stats = playerStats.get(playerId) || {
         appearances: 0,
+
         goals: 0,
         regularGoals: 0,
         penaltyGoals: 0,
+
         assists: 0,
+
         ownGoals: 0,
+
         yellowCards: 0,
         redCards: 0,
-        playerRating: 0,
+
+        defensivePoints: 0,
+
+        playerScore: 0,
       };
 
-      // ------------------------------------------------
-      // CALCULATE PLAYER RATING
-      // ------------------------------------------------
+      // ------------------------------------------------------
+      // CALCULATE TOTAL PLAYER POINTS
+      // ------------------------------------------------------
       //
-      // Starting/substitute appearance = +0.5
-      // Regular goal = +2
-      // Penalty goal = +1
-      // Assist = +1
-      // Own goal = +0
+      // Appearance     = +0.5
+      // Regular goal   = +2
+      // Penalty goal   = +1
+      // Assist         = +1
+      // Own goal       = -1
+      // Yellow card    = -2
+      // Red card       = -2
       //
-      // ------------------------------------------------
+      // GK:
+      // Defensive points up to 10 per match
+      //
+      // DF:
+      // Defensive points up to 6 per match
+      //
+      // MF / ST / FW:
+      // No defensive points
+      // ------------------------------------------------------
 
-      stats.playerRating =
+      stats.playerScore =
+        stats.appearances * 0.5 +
         stats.regularGoals * 2 +
         stats.penaltyGoals * 1 +
         stats.assists * 1 +
-        stats.appearances * 0.5;
+        stats.ownGoals * -1 +
+        stats.yellowCards * -1 +
+        stats.redCards * -2 +
+        stats.defensivePoints;
 
-      // ------------------------------------------------
-      // GET PLAYER'S TEAM
-      // ------------------------------------------------
+      // ------------------------------------------------------
+      // GET PLAYER TEAM
+      // ------------------------------------------------------
 
       const team = player.playsFor
         ? teamMap.get(player.playsFor.toString())
         : null;
 
-      // ------------------------------------------------
+      // ------------------------------------------------------
       // RETURN PLAYER
-      // ------------------------------------------------
+      // ------------------------------------------------------
 
       return {
         ...player,
@@ -300,14 +462,16 @@ const getPlayers = async (req, res) => {
           yellowCards: stats.yellowCards,
           redCards: stats.redCards,
 
-          playerRating: stats.playerRating,
+          defensivePoints: stats.defensivePoints,
+
+          playerScore: stats.playerScore,
         },
       };
     });
 
-    // --------------------------------------------------
-    // 7. SEND RESPONSE
-    // --------------------------------------------------
+    // --------------------------------------------------------
+    // 9. SEND RESPONSE
+    // --------------------------------------------------------
 
     res.status(200).json(result);
   } catch (error) {

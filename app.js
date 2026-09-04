@@ -14,6 +14,7 @@ import Score from "./models/Score.js";
 import { getUpcomingMatches } from "./controllers/matchController.js";
 import { adminLogin } from "./controllers/authController.js";
 import { getPlayers } from "./controllers/playerController.js";
+import { getScores } from "./controllers/scoreController.js";
 
 const app = express();
 
@@ -250,10 +251,6 @@ app.post("/api/scores", async (req, res) => {
       awayScore,
       timer,
       matchEvents,
-      homeStartingPlayers,
-      homeSubstitutes,
-      awayStartingPlayers,
-      awaySubstitutes,
     } = req.body;
 
     if (!match || !homeTeam || !awayTeam) {
@@ -270,10 +267,6 @@ app.post("/api/scores", async (req, res) => {
       awayScore,
       timer,
       matchEvents,
-      homeStartingPlayers,
-      homeSubstitutes,
-      awayStartingPlayers,
-      awaySubstitutes,
       finishedAt: new Date(),
     });
 
@@ -294,60 +287,7 @@ app.post("/api/scores", async (req, res) => {
 });
 
 // GET - Get all saved match scores
-app.get("/api/scores", async (req, res) => {
-  try {
-    const scores = await Score.find()
-      .populate({
-        path: "match",
-        select: "_id matchSchedule matchType matchTime playersPerTeam",
-        populate: {
-          path: "matchSchedule",
-          select: "date venue matchType",
-          populate: {
-            path: "venue",
-            select: "venue",
-          },
-        },
-      })
-      .populate({
-        path: "homeTeam",
-        select: "_id name shortForm logoLow logoHigh",
-      })
-      .populate({
-        path: "awayTeam",
-        select: "_id name shortForm logoLow logoHigh",
-      })
-      .populate({
-        path: "homeStartingPlayers",
-        select: "_id name jerseyNumber photo position",
-      })
-      .populate({
-        path: "homeSubstitutes",
-        select: "_id name jerseyNumber photo position",
-      })
-      .populate({
-        path: "awayStartingPlayers",
-        select: "_id name jerseyNumber photo position",
-      })
-      .populate({
-        path: "awaySubstitutes",
-        select: "_id name jerseyNumber photo position",
-      })
-      .sort({ finishedAt: -1 });
-
-    res.status(200).json({
-      success: true,
-      scores,
-    });
-  } catch (error) {
-    console.error("Error fetching scores:", error);
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch match scores",
-    });
-  }
-});
+app.get("/api/scores", getScores);
 
 // GET - Match score summary
 app.get("/api/scores/summary", async (req, res) => {

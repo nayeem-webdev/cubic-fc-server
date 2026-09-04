@@ -54,30 +54,6 @@ const scoreSchema = new Schema(
       default: [],
     },
 
-    homeStartingPlayers: {
-      type: [Schema.Types.ObjectId],
-      ref: "Player",
-      default: [],
-    },
-
-    homeSubstitutes: {
-      type: [Schema.Types.ObjectId],
-      ref: "Player",
-      default: [],
-    },
-
-    awayStartingPlayers: {
-      type: [Schema.Types.ObjectId],
-      ref: "Player",
-      default: [],
-    },
-
-    awaySubstitutes: {
-      type: [Schema.Types.ObjectId],
-      ref: "Player",
-      default: [],
-    },
-
     finishedAt: {
       type: Date,
       default: Date.now,

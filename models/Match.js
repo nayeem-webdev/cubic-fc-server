@@ -14,25 +14,12 @@ const matchSchema = new Schema(
       required: true,
     },
 
-    playersPerTeam: {
-      type: Number,
-      required: true,
-      min: 1,
-    },
-
     matchTime: {
       type: String,
       required: true,
       trim: true,
     },
 
-    matchType: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-
-    // IMPORTANT: This is a Schedule ID, not a Date
     matchSchedule: {
       type: Schema.Types.ObjectId,
       ref: "Schedule",
