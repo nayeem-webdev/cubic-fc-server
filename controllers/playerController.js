@@ -35,7 +35,7 @@ const updatePlayer = async (req, res) => {
 // DEFENSIVE POINT CALCULATORS
 // ============================================================
 
-// GK - Maximum 10 points
+// GK - Maximum 8 points
 const getGKPoints = (goalsConceded) => {
   if (goalsConceded <= 0) return 8;
   if (goalsConceded <= 2) return 6;
@@ -47,14 +47,10 @@ const getGKPoints = (goalsConceded) => {
 // DF - Maximum 5 points
 const getDefenderPoints = (goalsConceded) => {
   if (goalsConceded <= 0) return 5;
-  if (goalsConceded === 1) return 4.5;
-  if (goalsConceded === 2) return 4;
-  if (goalsConceded === 3) return 3.5;
-  if (goalsConceded === 4) return 3;
-  if (goalsConceded === 5) return 2.5;
-  if (goalsConceded === 6) return 2;
-  if (goalsConceded === 7) return 1.5;
-  if (goalsConceded === 8) return 1;
+  if (goalsConceded <= 2) return 4;
+  if (goalsConceded <= 4) return 2.5;
+  if (goalsConceded <= 6) return 1.5;
+
   return 0;
 };
 
@@ -81,8 +77,8 @@ const getPlayers = async (req, res) => {
     // --------------------------------------------------------
     // 3. GET MATCHES
     //
-    // Starting players and substitutes now come from MATCH,
-    // not SCORE.
+    // matchSchedule is included so we can calculate
+    // the player's LAST 5 matches correctly.
     // --------------------------------------------------------
 
     const matches = await Match.find()
@@ -90,11 +86,13 @@ const getPlayers = async (req, res) => {
         "_id " +
           "homeTeam " +
           "awayTeam " +
+          "matchSchedule " +
           "homeStartingPlayers " +
           "homeSubstitutes " +
           "awayStartingPlayers " +
           "awaySubstitutes",
       )
+      .sort({ matchSchedule: 1 })
       .lean();
 
     // Quick Match lookup
@@ -104,12 +102,6 @@ const getPlayers = async (req, res) => {
 
     // --------------------------------------------------------
     // 4. GET SCORES
-    //
-    // Score contains:
-    // - match
-    // - homeScore
-    // - awayScore
-    // - matchEvents
     // --------------------------------------------------------
 
     const scores = await Score.find()
@@ -144,9 +136,14 @@ const getPlayers = async (req, res) => {
         yellowCards: 0,
         redCards: 0,
 
-        // Total defensive points accumulated
-        // across all matches
+        // Defensive points accumulated
         defensivePoints: 0,
+
+        // Winning points
+        winPoints: 0,
+
+        // Match results for this player
+        matchResults: [],
 
         // Final total points
         playerScore: 0,
@@ -171,6 +168,41 @@ const getPlayers = async (req, res) => {
         return;
       }
 
+      // ------------------------------------------------------
+      // TEAM IDS
+      // ------------------------------------------------------
+      /*
+      const homeTeamId = match.homeTeam?.toString();
+      const awayTeamId = match.awayTeam?.toString();
+      */
+      // ------------------------------------------------------
+      // SCORES
+      // ------------------------------------------------------
+
+      const homeScore = Number(score.homeScore || 0);
+      const awayScore = Number(score.awayScore || 0);
+
+      // ------------------------------------------------------
+      // DETERMINE MATCH RESULT
+      // ------------------------------------------------------
+
+      let homeResult = "D";
+      let awayResult = "D";
+
+      if (homeScore > awayScore) {
+        homeResult = "W";
+        awayResult = "L";
+      }
+
+      if (homeScore < awayScore) {
+        homeResult = "L";
+        awayResult = "W";
+      }
+
+      // ------------------------------------------------------
+      // PLAYERS
+      // ------------------------------------------------------
+
       const homePlayers = [
         ...(match.homeStartingPlayers || []),
         ...(match.homeSubstitutes || []),
@@ -181,9 +213,9 @@ const getPlayers = async (req, res) => {
         ...(match.awaySubstitutes || []),
       ];
 
-      // ------------------------------------------------------
+      // ======================================================
       // HOME TEAM PLAYERS
-      // ------------------------------------------------------
+      // ======================================================
 
       const homeUniquePlayers = new Set();
 
@@ -208,12 +240,33 @@ const getPlayers = async (req, res) => {
 
         const stats = playerStats.get(id);
 
-        // Appearance
+        // ----------------------------------------------------
+        // APPEARANCE
+        // ----------------------------------------------------
+
         stats.appearances += 1;
 
-        // -----------------------------------------------
+        // ----------------------------------------------------
+        // MATCH RESULT
+        // ----------------------------------------------------
+
+        stats.matchResults.push({
+          matchId,
+          date: match.matchSchedule || null,
+          result: homeResult,
+        });
+
+        // ----------------------------------------------------
+        // WIN POINTS
+        // ----------------------------------------------------
+
+        if (homeResult === "W") {
+          stats.winPoints += 2;
+        }
+
+        // ----------------------------------------------------
         // DEFENSIVE POINTS
-        // -----------------------------------------------
+        // ----------------------------------------------------
 
         const player = players.find((p) => p._id.toString() === id);
 
@@ -221,7 +274,7 @@ const getPlayers = async (req, res) => {
           return;
         }
 
-        const goalsConceded = Number(score.awayScore || 0);
+        const goalsConceded = awayScore;
 
         if (player.position === "GK") {
           stats.defensivePoints += getGKPoints(goalsConceded);
@@ -232,9 +285,9 @@ const getPlayers = async (req, res) => {
         }
       });
 
-      // ------------------------------------------------------
+      // ======================================================
       // AWAY TEAM PLAYERS
-      // ------------------------------------------------------
+      // ======================================================
 
       const awayUniquePlayers = new Set();
 
@@ -259,12 +312,33 @@ const getPlayers = async (req, res) => {
 
         const stats = playerStats.get(id);
 
-        // Appearance
+        // ----------------------------------------------------
+        // APPEARANCE
+        // ----------------------------------------------------
+
         stats.appearances += 1;
 
-        // -----------------------------------------------
+        // ----------------------------------------------------
+        // MATCH RESULT
+        // ----------------------------------------------------
+
+        stats.matchResults.push({
+          matchId,
+          date: match.matchSchedule || null,
+          result: awayResult,
+        });
+
+        // ----------------------------------------------------
+        // WIN POINTS
+        // ----------------------------------------------------
+
+        if (awayResult === "W") {
+          stats.winPoints += 2;
+        }
+
+        // ----------------------------------------------------
         // DEFENSIVE POINTS
-        // -----------------------------------------------
+        // ----------------------------------------------------
 
         const player = players.find((p) => p._id.toString() === id);
 
@@ -272,7 +346,7 @@ const getPlayers = async (req, res) => {
           return;
         }
 
-        const goalsConceded = Number(score.homeScore || 0);
+        const goalsConceded = homeScore;
 
         if (player.position === "GK") {
           stats.defensivePoints += getGKPoints(goalsConceded);
@@ -283,18 +357,18 @@ const getPlayers = async (req, res) => {
         }
       });
 
-      // ------------------------------------------------------
-      // 7. PROCESS MATCH EVENTS
-      // ------------------------------------------------------
+      // ======================================================
+      // PROCESS MATCH EVENTS
+      // ======================================================
 
       (score.matchEvents || []).forEach((event) => {
         const scorerId = event.scorer?.toString();
         const assisterId = event.assister?.toString();
         const playerId = event.player?.toString();
 
-        // ====================================================
+        // ----------------------------------------------------
         // REGULAR GOAL
-        // ====================================================
+        // ----------------------------------------------------
 
         if (event.type === "goal") {
           // Goal scorer
@@ -313,9 +387,9 @@ const getPlayers = async (req, res) => {
           }
         }
 
-        // ====================================================
+        // ----------------------------------------------------
         // PENALTY GOAL
-        // ====================================================
+        // ----------------------------------------------------
 
         if (event.type === "penalty") {
           if (scorerId && playerStats.has(scorerId)) {
@@ -328,13 +402,9 @@ const getPlayers = async (req, res) => {
           // No assist for penalty
         }
 
-        // ====================================================
+        // ----------------------------------------------------
         // OWN GOAL
-        //
-        // Own goal:
-        // - +1 own goal statistic
-        // - -1 point
-        // ====================================================
+        // ----------------------------------------------------
 
         if (event.type === "ownGoal") {
           if (scorerId && playerStats.has(scorerId)) {
@@ -344,12 +414,12 @@ const getPlayers = async (req, res) => {
           }
         }
 
-        // ====================================================
+        // ----------------------------------------------------
         // CARD
         //
-        // Yellow = -2
+        // Yellow = -1
         // Red = -2
-        // ====================================================
+        // ----------------------------------------------------
 
         if (event.type === "card") {
           if (playerId && playerStats.has(playerId)) {
@@ -368,7 +438,7 @@ const getPlayers = async (req, res) => {
     });
 
     // --------------------------------------------------------
-    // 8. BUILD FINAL PLAYER RESPONSE
+    // 7. BUILD FINAL PLAYER RESPONSE
     // --------------------------------------------------------
 
     const result = players.map((player) => {
@@ -390,33 +460,117 @@ const getPlayers = async (req, res) => {
 
         defensivePoints: 0,
 
+        winPoints: 0,
+
+        matchResults: [],
+
         playerScore: 0,
       };
 
-      // ------------------------------------------------------
+      // ======================================================
+      // SORT PLAYER MATCHES
+      //
+      // Oldest -> newest
+      // ======================================================
+
+      stats.matchResults.sort((a, b) => {
+        const dateA = a.date ? new Date(a.date).getTime() : 0;
+
+        const dateB = b.date ? new Date(b.date).getTime() : 0;
+
+        return dateA - dateB;
+      });
+
+      // ======================================================
+      // LAST 5 MATCHES
+      //
+      // Latest 5 matches only
+      // ======================================================
+
+      const last5Matches = stats.matchResults.slice(-5);
+
+      // ======================================================
+      // LAST 5 RESULTS
+      // ======================================================
+
+      const last5 = last5Matches.map((match) => match.result);
+
+      // ======================================================
+      // LAST 5 WINS
+      // ======================================================
+
+      const winsLast5 = last5Matches.filter(
+        (match) => match.result === "W",
+      ).length;
+
+      // ======================================================
+      // TOTAL WINS / DRAWS / LOSSES
+      // ======================================================
+
+      const wins = stats.matchResults.filter(
+        (match) => match.result === "W",
+      ).length;
+
+      const draws = stats.matchResults.filter(
+        (match) => match.result === "D",
+      ).length;
+
+      const losses = stats.matchResults.filter(
+        (match) => match.result === "L",
+      ).length;
+
+      // ======================================================
+      // WIN RATE
+      // ======================================================
+
+      const winRate =
+        stats.appearances > 0
+          ? Number(((wins / stats.appearances) * 100).toFixed(1))
+          : 0;
+
+      // ======================================================
+      // CURRENT WINNING STREAK
+      //
+      // Start from latest match and count backwards
+      // until a draw/loss appears.
+      // ======================================================
+
+      let currentWinStreak = 0;
+
+      for (let i = stats.matchResults.length - 1; i >= 0; i--) {
+        if (stats.matchResults[i].result === "W") {
+          currentWinStreak += 1;
+        } else {
+          break;
+        }
+      }
+
+      // ======================================================
       // CALCULATE TOTAL PLAYER POINTS
-      // ------------------------------------------------------
+      // ======================================================
       //
       // Appearance     = +0.5
+      // Win            = +2
       // Regular goal   = +2
       // Penalty goal   = +1
       // Assist         = +1
       // Own goal       = -1
-      // Yellow card    = -2
+      // Yellow card    = -1
       // Red card       = -2
       //
       // GK:
-      // Defensive points up to 10 per match
+      // Defensive points up to 8 per match
       //
       // DF:
-      // Defensive points up to 6 per match
+      // Defensive points up to 5 per match
       //
       // MF / ST / FW:
       // No defensive points
-      // ------------------------------------------------------
+      // ======================================================
 
       stats.playerScore =
         stats.appearances * 0.5 +
+        stats.winPoints +
         stats.regularGoals * 2 +
         stats.penaltyGoals * 1 +
         stats.assists * 1 +
@@ -425,17 +579,17 @@ const getPlayers = async (req, res) => {
         stats.redCards * -2 +
         stats.defensivePoints;
 
-      // ------------------------------------------------------
+      // ======================================================
       // GET PLAYER TEAM
-      // ------------------------------------------------------
+      // ======================================================
 
       const team = player.playsFor
         ? teamMap.get(player.playsFor.toString())
         : null;
 
-      // ------------------------------------------------------
+      // ======================================================
       // RETURN PLAYER
-      // ------------------------------------------------------
+      // ======================================================
 
       return {
         ...player,
@@ -449,7 +603,25 @@ const getPlayers = async (req, res) => {
           : null,
 
         stats: {
+          // --------------------------------------------------
+          // MATCH RECORD
+          // --------------------------------------------------
+
           appearances: stats.appearances,
+
+          wins,
+          draws,
+          losses,
+
+          winRate,
+
+          last5,
+          winsLast5,
+          currentWinStreak,
+
+          // --------------------------------------------------
+          // SCORING
+          // --------------------------------------------------
 
           goals: stats.goals,
           regularGoals: stats.regularGoals,
@@ -462,6 +634,11 @@ const getPlayers = async (req, res) => {
           yellowCards: stats.yellowCards,
           redCards: stats.redCards,
 
+          // --------------------------------------------------
+          // POINTS
+          // --------------------------------------------------
+
+          winPoints: stats.winPoints,
           defensivePoints: stats.defensivePoints,
 
           playerScore: stats.playerScore,
@@ -470,7 +647,7 @@ const getPlayers = async (req, res) => {
     });
 
     // --------------------------------------------------------
-    // 9. SEND RESPONSE
+    // 8. SEND RESPONSE
     // --------------------------------------------------------
 
     res.status(200).json(result);
