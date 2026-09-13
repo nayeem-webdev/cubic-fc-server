@@ -32,7 +32,7 @@ const playerSchema = new Schema(
 
     playsFor: {
       type: Schema.Types.ObjectId,
-      ref: "Club",
+      ref: "Team", // ✅ Changed from Club to Team
       required: true,
     },
 

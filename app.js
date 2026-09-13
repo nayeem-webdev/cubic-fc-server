@@ -14,7 +14,8 @@ import Score from "./models/Score.js";
 import { getUpcomingMatches } from "./controllers/matchController.js";
 import { adminLogin } from "./controllers/authController.js";
 import { getPlayers } from "./controllers/playerController.js";
-import { getScores } from "./controllers/scoreController.js";
+import { getScores, postScore } from "./controllers/scoreController.js";
+import { getTeams } from "./controllers/TeamController.js";
 
 const app = express();
 
@@ -198,24 +199,6 @@ app.post("/api/teams", async (req, res) => {
   }
 });
 
-// GET - Get All Teams
-app.get("/api/teams", async (req, res) => {
-  try {
-    const teams = await Team.find()
-      .populate("captain", "name position jerseyNumber photo")
-      .sort({ createdAt: -1 });
-
-    res.status(200).json(teams);
-  } catch (error) {
-    console.error("Error getting teams:", error.message);
-
-    res.status(500).json({
-      message: "Failed to get teams",
-      error: error.message,
-    });
-  }
-});
-
 // POST - Add a new Match
 app.post("/api/matches", async (req, res) => {
   try {
@@ -241,50 +224,7 @@ app.post("/api/matches", async (req, res) => {
 app.get("/api/matches", getUpcomingMatches);
 
 // POST - Save completed match score
-app.post("/api/scores", async (req, res) => {
-  try {
-    const {
-      match,
-      homeTeam,
-      awayTeam,
-      homeScore,
-      awayScore,
-      timer,
-      matchEvents,
-    } = req.body;
-
-    if (!match || !homeTeam || !awayTeam) {
-      return res.status(400).json({
-        message: "Match and teams are required",
-      });
-    }
-
-    const score = new Score({
-      match,
-      homeTeam,
-      awayTeam,
-      homeScore,
-      awayScore,
-      timer,
-      matchEvents,
-      finishedAt: new Date(),
-    });
-
-    const savedScore = await score.save();
-
-    res.status(201).json({
-      message: "Match score saved successfully",
-      score: savedScore,
-    });
-  } catch (error) {
-    console.error("Error saving match score:", error);
-
-    res.status(500).json({
-      message: "Failed to save match score",
-      error: error.message,
-    });
-  }
-});
+app.post("/api/scores", postScore);
 
 // GET - Get all saved match scores
 app.get("/api/scores", getScores);
@@ -317,6 +257,28 @@ app.get("/api/scores/summary", async (req, res) => {
     });
   }
 });
+
+// GET - Teams, stats
+app.get("/api/teams-details", getTeams);
+
+// GET - Get All Teams
+app.get("/api/teams", async (req, res) => {
+  try {
+    const teams = await Team.find()
+      .populate("captain", "name position jerseyNumber photo")
+      .sort({ createdAt: -1 });
+
+    res.status(200).json(teams);
+  } catch (error) {
+    console.error("Error getting teams:", error.message);
+
+    res.status(500).json({
+      message: "Failed to get teams",
+      error: error.message,
+    });
+  }
+});
+
 
 // ===============================
 // CONNECT TO MONGODB

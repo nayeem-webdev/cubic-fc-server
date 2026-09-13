@@ -1,5 +1,66 @@
 import Score from "../models/Score.js";
 
+const postScore = async (req, res) => {
+  try {
+    const {
+      match,
+      homeTeam,
+      awayTeam,
+      homeScore,
+      awayScore,
+      timer,
+      matchEvents,
+    } = req.body;
+
+    if (!match || !homeTeam || !awayTeam) {
+      return res.status(400).json({
+        message: "Match and teams are required",
+      });
+    }
+
+    const existingScore = await Score.findOne({ match });
+
+    if (existingScore) {
+      return res.status(409).json({
+        message: "This match score has already been saved",
+        scoreId: existingScore._id,
+      });
+    }
+
+    const score = new Score({
+      match,
+      homeTeam,
+      awayTeam,
+      homeScore,
+      awayScore,
+      timer,
+      matchEvents,
+      finishedAt: new Date(),
+    });
+
+    const savedScore = await score.save();
+
+    return res.status(201).json({
+      message: "Match score saved successfully",
+      score: savedScore,
+    });
+  } catch (error) {
+    console.error("Error saving match score:", error);
+
+    // MongoDB duplicate key protection
+    if (error.code === 11000) {
+      return res.status(409).json({
+        message: "This match score has already been saved",
+      });
+    }
+
+    return res.status(500).json({
+      message: "Failed to save match score",
+      error: error.message,
+    });
+  }
+};
+
 const getScores = async (req, res) => {
   try {
     const scores = await Score.find()
@@ -76,4 +137,4 @@ const getScores = async (req, res) => {
   }
 };
 
-export { getScores };
+export { getScores, postScore };

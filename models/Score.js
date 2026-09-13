@@ -6,6 +6,7 @@ const scoreSchema = new Schema(
       type: Schema.Types.ObjectId,
       ref: "Match",
       required: true,
+      unique: true,
     },
 
     homeTeam: {
