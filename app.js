@@ -7,11 +7,16 @@ import mongoose from "mongoose";
 import Player from "./models/Player.js";
 import Schedule from "./models/Schedule.js";
 import Team from "./models/Team.js";
-import Match from "./models/Match.js";
 import Venue from "./models/Venue.js";
 import Score from "./models/Score.js";
 
-import { getUpcomingMatches } from "./controllers/matchController.js";
+import {
+  addMatch,
+  deleteMatch,
+  getSingleMatch,
+  getUpcomingMatches,
+  patchMatch,
+} from "./controllers/matchController.js";
 import { adminLogin } from "./controllers/authController.js";
 import { getPlayers } from "./controllers/playerController.js";
 import { getScores, postScore } from "./controllers/scoreController.js";
@@ -200,29 +205,19 @@ app.post("/api/teams", async (req, res) => {
 });
 
 // POST - Add a new Match
-app.post("/api/matches", async (req, res) => {
-  try {
-    const match = new Match(req.body);
-
-    const savedMatch = await match.save();
-
-    res.status(201).json({
-      message: "Match created successfully",
-      match: savedMatch,
-    });
-  } catch (error) {
-    console.error("Error creating match:", error.message);
-
-    res.status(400).json({
-      message: "Failed to create match",
-      error: error.message,
-    });
-  }
-});
+app.post("/api/matches", addMatch);
 
 // GET - All Upcoming Matches
 app.get("/api/matches", getUpcomingMatches);
 
+// DELETE - Delete a Matches
+app.delete("/api/matches/:id", deleteMatch);
+
+// GET - Single Matches With ID
+app.get("/api/matches/:id", getSingleMatch);
+
+// PATCH - Update an existing Match
+app.patch("/api/matches/:id", patchMatch);
 // POST - Save completed match score
 app.post("/api/scores", postScore);
 
@@ -278,7 +273,6 @@ app.get("/api/teams", async (req, res) => {
     });
   }
 });
-
 
 // ===============================
 // CONNECT TO MONGODB
