@@ -32,13 +32,19 @@ const playerSchema = new Schema(
 
     playsFor: {
       type: Schema.Types.ObjectId,
-      ref: "Team", // ✅ Changed from Club to Team
+      ref: "Team",
       required: true,
     },
 
     dateOfBirth: {
       type: String,
       default: "",
+    },
+    status: {
+      type: String,
+      enum: ["active", "inactive", "retired"],
+      default: "active",
+      required: true,
     },
   },
   {
