@@ -4,34 +4,6 @@ import Team from "../models/Team.js";
 import Match from "../models/Match.js";
 
 // ============================================================
-// UPDATE PLAYER
-// ============================================================
-
-const updatePlayer = async (req, res) => {
-  try {
-    const player = await Player.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
-      runValidators: true,
-    });
-
-    if (!player) {
-      return res.status(404).json({
-        message: "Player not found",
-      });
-    }
-
-    res.status(200).json(player);
-  } catch (error) {
-    console.error("Error updating player:", error);
-
-    res.status(500).json({
-      message: "Failed to update player",
-      error: error.message,
-    });
-  }
-};
-
-// ============================================================
 // DEFENSIVE POINT CALCULATORS
 // ============================================================
 
@@ -54,59 +26,92 @@ const getDefenderPoints = (goalsConceded) => {
 // ============================================================
 // GET ALL PLAYERS WITH TEAM + STATISTICS
 // ============================================================
-
 const getPlayers = async (req, res) => {
   try {
-    // 1. GET PLAYERS
-    const players = await Player.find().sort({ createdAt: -1 }).lean();
+    // -------------------------------------------------------
+    // 1. FETCH DATA
+    // -------------------------------------------------------
 
-    // 2. GET TEAMS
-    const teams = await Team.find().select("_id name logoLow").lean();
+    const [players, teams, matches, scores] = await Promise.all([
+      Player.find().sort({ createdAt: -1 }).lean(),
 
-    const teamMap = new Map(
-      teams.map((team) => [team._id.toString(), team])
-    );
+      Team.find().select("_id name logoLow").lean(),
 
-    // 3. GET MATCHES
-    const matches = await Match.find()
-      .select(
-        "_id homeTeam awayTeam matchSchedule homeStartingPlayers homeSubstitutes awayStartingPlayers awaySubstitutes"
-      )
-      .sort({ matchSchedule: 1 })
-      .lean();
+      Match.find()
+        .select(
+          "_id homeTeam awayTeam matchSchedule " +
+            "homeStartingPlayers homeSubstitutes " +
+            "awayStartingPlayers awaySubstitutes createdAt",
+        )
+        .sort({ createdAt: 1 })
+        .lean(),
+
+      Score.find()
+        .select("match homeTeam awayTeam homeScore awayScore matchEvents")
+        .lean(),
+    ]);
+
+    // -------------------------------------------------------
+    // 2. LOOKUP MAPS
+    // -------------------------------------------------------
+
+    const teamMap = new Map(teams.map((team) => [team._id.toString(), team]));
 
     const matchMap = new Map(
-      matches.map((match) => [match._id.toString(), match])
+      matches.map((match) => [match._id.toString(), match]),
     );
 
-    // 4. GET SCORES
-    const scores = await Score.find()
-      .select("match homeTeam awayTeam homeScore awayScore matchEvents")
-      .lean();
+    const playerMap = new Map(
+      players.map((player) => [player._id.toString(), player]),
+    );
 
-    // 5. INITIALIZE MAPS & PLAYER STATS
-    const teamMatchesMap = new Map();
-    const playerStats = new Map();
+    // -------------------------------------------------------
+    // 3. INITIALIZE PLAYER STATS
+    // -------------------------------------------------------
 
-    players.forEach((player) => {
-      playerStats.set(player._id.toString(), {
-        appearances: 0,
-        goals: 0,
-        regularGoals: 0,
-        penaltyGoals: 0,
-        assists: 0,
-        ownGoals: 0,
-        yellowCards: 0,
-        redCards: 0,
-        defensivePoints: 0,
-        winPoints: 0,
-        matchResults: [],
-        playedMatchIds: new Set(),
-        playerScore: 0,
-      });
+    const createPlayerStats = () => ({
+      appearances: 0,
+
+      // Matches where the player was selected
+      // as starter OR substitute
+      participatedMatches: [],
+
+      goals: 0,
+      regularGoals: 0,
+      penaltyGoals: 0,
+      assists: 0,
+      ownGoals: 0,
+
+      yellowCards: 0,
+      redCards: 0,
+
+      defensivePoints: 0,
+      winPoints: 0,
+
+      matchResults: [],
+      playedMatchIds: new Set(),
+
+      playerScore: 0,
     });
 
-    // 6. PROCESS SCORES
+    const playerStats = new Map(
+      players.map((player) => [player._id.toString(), createPlayerStats()]),
+    );
+
+    // -------------------------------------------------------
+    // 4. HELPER - GET ID STRING
+    // -------------------------------------------------------
+
+    const getPlayerId = (player) => {
+      if (!player) return null;
+
+      return player._id ? player._id.toString() : player.toString();
+    };
+
+    // -------------------------------------------------------
+    // 5. PROCESS SCORES
+    // -------------------------------------------------------
+
     scores.forEach((score) => {
       const matchId = score.match?.toString();
 
@@ -116,55 +121,11 @@ const getPlayers = async (req, res) => {
 
       if (!match) return;
 
-      const matchDate = match.matchSchedule || score.createdAt || null;
+      const matchDate = match.createdAt || null;
 
-      // Extract Team IDs from Score/Match
-      const homeTeamId =
-        (
-          score.homeTeam?._id ||
-          score.homeTeam ||
-          match.homeTeam
-        )?._id?.toString() ||
-        (
-          score.homeTeam?._id ||
-          score.homeTeam ||
-          match.homeTeam
-        )?.toString();
-
-      const awayTeamId =
-        (
-          score.awayTeam?._id ||
-          score.awayTeam ||
-          match.awayTeam
-        )?._id?.toString() ||
-        (
-          score.awayTeam?._id ||
-          score.awayTeam ||
-          match.awayTeam
-        )?.toString();
-
-      // Collect team matches
-      if (homeTeamId) {
-        if (!teamMatchesMap.has(homeTeamId)) {
-          teamMatchesMap.set(homeTeamId, []);
-        }
-
-        teamMatchesMap.get(homeTeamId).push({
-          matchId,
-          date: matchDate,
-        });
-      }
-
-      if (awayTeamId) {
-        if (!teamMatchesMap.has(awayTeamId)) {
-          teamMatchesMap.set(awayTeamId, []);
-        }
-
-        teamMatchesMap.get(awayTeamId).push({
-          matchId,
-          date: matchDate,
-        });
-      }
+      // -----------------------------------------------------
+      // SCORE
+      // -----------------------------------------------------
 
       const homeScore = Number(score.homeScore || 0);
       const awayScore = Number(score.awayScore || 0);
@@ -180,129 +141,123 @@ const getPlayers = async (req, res) => {
         awayResult = "W";
       }
 
+      // -----------------------------------------------------
+      // PROCESS TEAM PLAYERS
+      // -----------------------------------------------------
+
+      const processTeamPlayers = ({
+        startingPlayers = [],
+        substitutes = [],
+        result,
+        opponentScore,
+      }) => {
+        const uniquePlayers = new Set([
+          ...startingPlayers.map(getPlayerId),
+          ...substitutes.map(getPlayerId),
+        ]);
+
+        uniquePlayers.forEach((playerId) => {
+          if (!playerId || !playerStats.has(playerId)) {
+            return;
+          }
+
+          const stats = playerStats.get(playerId);
+          const player = playerMap.get(playerId);
+
+          // -------------------------------------------------
+          // PARTICIPATION
+          // Starter OR substitute = P
+          // -------------------------------------------------
+
+          stats.participatedMatches.push(matchId);
+
+          // -------------------------------------------------
+          // APPEARANCE
+          // -------------------------------------------------
+
+          stats.appearances += 1;
+
+          stats.playedMatchIds.add(matchId);
+
+          // -------------------------------------------------
+          // MATCH RESULT
+          // -------------------------------------------------
+
+          stats.matchResults.push({
+            matchId,
+            date: matchDate,
+            result,
+          });
+
+          // -------------------------------------------------
+          // WIN POINTS
+          // -------------------------------------------------
+
+          if (result === "W") {
+            stats.winPoints += 2;
+          }
+
+          // -------------------------------------------------
+          // DEFENSIVE POINTS
+          // -------------------------------------------------
+
+          if (player?.position === "GK") {
+            stats.defensivePoints += getGKPoints(opponentScore);
+          }
+
+          if (player?.position === "DF") {
+            stats.defensivePoints += getDefenderPoints(opponentScore);
+          }
+        });
+      };
+
+      // -----------------------------------------------------
       // HOME PLAYERS
-      const homePlayers = [
-        ...(match.homeStartingPlayers || []),
-        ...(match.homeSubstitutes || []),
-      ];
+      // -----------------------------------------------------
 
-      const homeUniquePlayers = new Set();
+      processTeamPlayers({
+        startingPlayers: match.homeStartingPlayers || [],
 
-      homePlayers.forEach((playerId) => {
-        const id = playerId?._id
-          ? playerId._id.toString()
-          : playerId?.toString();
+        substitutes: match.homeSubstitutes || [],
 
-        if (
-          !id ||
-          !playerStats.has(id) ||
-          homeUniquePlayers.has(id)
-        ) {
-          return;
-        }
+        result: homeResult,
 
-        homeUniquePlayers.add(id);
-
-        const stats = playerStats.get(id);
-
-        stats.appearances += 1;
-
-        // Important:
-        // This records participation regardless of team.
-        stats.playedMatchIds.add(matchId);
-
-        stats.matchResults.push({
-          matchId,
-          date: matchDate,
-          result: homeResult,
-        });
-
-        if (homeResult === "W") {
-          stats.winPoints += 2;
-        }
-
-        const player = players.find(
-          (p) => p._id.toString() === id
-        );
-
-        if (player) {
-          if (player.position === "GK") {
-            stats.defensivePoints += getGKPoints(awayScore);
-          }
-
-          if (player.position === "DF") {
-            stats.defensivePoints += getDefenderPoints(awayScore);
-          }
-        }
+        opponentScore: awayScore,
       });
 
+      // -----------------------------------------------------
       // AWAY PLAYERS
-      const awayPlayers = [
-        ...(match.awayStartingPlayers || []),
-        ...(match.awaySubstitutes || []),
-      ];
+      // -----------------------------------------------------
 
-      const awayUniquePlayers = new Set();
+      processTeamPlayers({
+        startingPlayers: match.awayStartingPlayers || [],
 
-      awayPlayers.forEach((playerId) => {
-        const id = playerId?._id
-          ? playerId._id.toString()
-          : playerId?.toString();
+        substitutes: match.awaySubstitutes || [],
 
-        if (
-          !id ||
-          !playerStats.has(id) ||
-          awayUniquePlayers.has(id)
-        ) {
-          return;
-        }
+        result: awayResult,
 
-        awayUniquePlayers.add(id);
-
-        const stats = playerStats.get(id);
-
-        stats.appearances += 1;
-
-        // Important:
-        // This records participation regardless of team.
-        stats.playedMatchIds.add(matchId);
-
-        stats.matchResults.push({
-          matchId,
-          date: matchDate,
-          result: awayResult,
-        });
-
-        if (awayResult === "W") {
-          stats.winPoints += 2;
-        }
-
-        const player = players.find(
-          (p) => p._id.toString() === id
-        );
-
-        if (player) {
-          if (player.position === "GK") {
-            stats.defensivePoints += getGKPoints(homeScore);
-          }
-
-          if (player.position === "DF") {
-            stats.defensivePoints += getDefenderPoints(homeScore);
-          }
-        }
+        opponentScore: homeScore,
       });
 
+      // -----------------------------------------------------
       // MATCH EVENTS
-      (score.matchEvents || []).forEach((event) => {
-        const scorerId = event.scorer?.toString();
-        const assisterId = event.assister?.toString();
-        const playerId = event.player?.toString();
+      // -----------------------------------------------------
 
+      (score.matchEvents || []).forEach((event) => {
+        const scorerId = getPlayerId(event.scorer);
+        const assisterId = getPlayerId(event.assister);
+        const playerId = getPlayerId(event.player);
+
+        // ---------------------------------------------------
         // REGULAR GOAL
+        // ---------------------------------------------------
+
         if (event.type === "goal") {
           if (scorerId && playerStats.has(scorerId)) {
-            playerStats.get(scorerId).goals += 1;
-            playerStats.get(scorerId).regularGoals += 1;
+            const stats = playerStats.get(scorerId);
+
+            stats.goals += 1;
+            stats.regularGoals += 1;
           }
 
           if (assisterId && playerStats.has(assisterId)) {
@@ -310,265 +265,169 @@ const getPlayers = async (req, res) => {
           }
         }
 
+        // ---------------------------------------------------
         // PENALTY GOAL
+        // ---------------------------------------------------
+
         if (event.type === "penalty") {
           if (scorerId && playerStats.has(scorerId)) {
-            playerStats.get(scorerId).goals += 1;
-            playerStats.get(scorerId).penaltyGoals += 1;
+            const stats = playerStats.get(scorerId);
+
+            stats.goals += 1;
+            stats.penaltyGoals += 1;
           }
         }
 
+        // ---------------------------------------------------
         // OWN GOAL
+        // ---------------------------------------------------
+
         if (event.type === "ownGoal") {
           if (scorerId && playerStats.has(scorerId)) {
             playerStats.get(scorerId).ownGoals += 1;
           }
         }
 
+        // ---------------------------------------------------
         // CARDS
-        if (event.type === "card") {
-          if (playerId && playerStats.has(playerId)) {
-            if (event.card === "yellow") {
-              playerStats.get(playerId).yellowCards += 1;
-            }
+        // ---------------------------------------------------
 
-            if (event.card === "red") {
-              playerStats.get(playerId).redCards += 1;
-            }
+        if (event.type === "card") {
+          if (!playerId || !playerStats.has(playerId)) {
+            return;
+          }
+
+          const stats = playerStats.get(playerId);
+
+          if (event.card === "yellow") {
+            stats.yellowCards += 1;
+          }
+
+          if (event.card === "red") {
+            stats.redCards += 1;
           }
         }
       });
     });
 
-    // =========================================================
-    // COMPLETED MATCHES
-    // A match is completed when it has a saved Score.
-    // =========================================================
+    // -------------------------------------------------------
+    // 6. SORT ALL MATCHES CHRONOLOGICALLY
+    // -------------------------------------------------------
 
-    const completedMatchIds = new Set(
-      scores
-        .map((score) => score.match?.toString())
-        .filter(Boolean)
+    const completedMatches = [...matchMap.values()].sort(
+      (a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0),
     );
 
-    const allCompletedMatches = [...matchMap.values()]
-      .filter((match) =>
-        completedMatchIds.has(match._id.toString())
-      )
-      .sort((a, b) => {
-        const dateA = a.matchSchedule
-          ? new Date(a.matchSchedule).getTime()
-          : 0;
+    // -------------------------------------------------------
+    // 7. BUILD PLAYER RESPONSE
+    // -------------------------------------------------------
 
-        const dateB = b.matchSchedule
-          ? new Date(b.matchSchedule).getTime()
-          : 0;
-
-        return dateA - dateB;
-      });
-
-    // =========================================================
-    // GLOBAL LAST 5 MATCHES
-    // Team does NOT matter.
-    // =========================================================
-
-    const last5GlobalMatches = allCompletedMatches.slice(-5);
-
-    // =========================================================
-    // GLOBAL LAST 4 MATCHES
-    // Used only for ACTIVE / INACTIVE status.
-    // =========================================================
-
-    const last4GlobalMatches = allCompletedMatches.slice(-4);
-
-    // 7. BUILD FINAL RESPONSE
     const result = players.map((player) => {
       const playerId = player._id.toString();
 
-      const playerTeamId = player.playsFor
-        ? player.playsFor.toString()
-        : null;
+      const stats = playerStats.get(playerId) || createPlayerStats();
 
-      const stats = playerStats.get(playerId) || {
-        appearances: 0,
-        goals: 0,
-        regularGoals: 0,
-        penaltyGoals: 0,
-        assists: 0,
-        ownGoals: 0,
-        yellowCards: 0,
-        redCards: 0,
-        defensivePoints: 0,
-        winPoints: 0,
-        matchResults: [],
-        playedMatchIds: new Set(),
-        playerScore: 0,
-      };
+      // -----------------------------------------------------
+      // SORT PLAYER MATCH RESULTS
+      // -----------------------------------------------------
 
-      // =======================================================
-      // SORT PLAYER MATCH RESULTS CHRONOLOGICALLY
-      // =======================================================
+      stats.matchResults.sort(
+        (a, b) => new Date(a.date || 0) - new Date(b.date || 0),
+      );
 
-      stats.matchResults.sort((a, b) => {
-        const dateA = a.date
-          ? new Date(a.date).getTime()
-          : 0;
+      // -----------------------------------------------------
+      // PARTICIPATED LAST 5
+      //
+      // P = player was in starting OR substitutes
+      // A = player was not selected
+      // -----------------------------------------------------
 
-        const dateB = b.date
-          ? new Date(b.date).getTime()
-          : 0;
+      const participatedLast5 = completedMatches.slice(-5).map((match) => {
+        const matchId = match._id.toString();
 
-        return dateA - dateB;
+        return stats.participatedMatches.includes(matchId) ? "P" : "A";
       });
 
-      // =======================================================
-      // PLAYER'S LAST 5 RESULTS
-      // W / D / L
-      //
-      // This remains based on matches the player actually played.
-      // =======================================================
-
-      const last5Matches = stats.matchResults.slice(-5);
-
-      const last5 = last5Matches.map(
-        (match) => match.result
-      );
-
-      // =======================================================
-      // GLOBAL LAST 5 ATTENDANCE
-      //
-      // P = Played
-      // A = Absent
-      //
-      // Team does NOT matter.
-      // =======================================================
-
-      const participatedLast5 = last5GlobalMatches.map(
-        (match) =>
-          stats.playedMatchIds.has(match._id.toString())
-            ? "P"
-            : "A"
-      );
-
-      // =======================================================
-      // ACTIVE / INACTIVE
-      //
-      // If player missed all of the last 4 completed matches:
-      // inactive
-      //
-      // If player played at least 1 of the last 4:
-      // active
-      //
-      // Team does NOT matter.
-      // =======================================================
-
-      const participatedLast4 = last4GlobalMatches.map(
-        (match) =>
-          stats.playedMatchIds.has(match._id.toString())
-            ? "P"
-            : "A"
-      );
-
-      const status =
-        last4GlobalMatches.length === 0
-          ? "active"
-          : participatedLast4.length === 4 &&
-            participatedLast4.every(
-              (item) => item === "A"
-            )
-          ? "inactive"
-          : "active";
-
-      // =======================================================
+      // -----------------------------------------------------
       // WINS / DRAWS / LOSSES
-      // =======================================================
+      // -----------------------------------------------------
 
       const wins = stats.matchResults.filter(
-        (m) => m.result === "W"
+        (match) => match.result === "W",
       ).length;
 
       const draws = stats.matchResults.filter(
-        (m) => m.result === "D"
+        (match) => match.result === "D",
       ).length;
 
       const losses = stats.matchResults.filter(
-        (m) => m.result === "L"
+        (match) => match.result === "L",
       ).length;
 
-      const winsLast5 = last5Matches.filter(
-        (m) => m.result === "W"
-      ).length;
+      // -----------------------------------------------------
+      // LAST 5 RESULTS
+      // -----------------------------------------------------
 
-      // =======================================================
+      const last5 = stats.matchResults.slice(-5).map((match) => match.result);
+
+      // -----------------------------------------------------
       // WIN RATE
-      // =======================================================
+      // -----------------------------------------------------
 
       const winRate =
         stats.appearances > 0
-          ? Number(
-              (
-                (wins / stats.appearances) *
-                100
-              ).toFixed(1)
-            )
+          ? Number(((wins / stats.appearances) * 100).toFixed(1))
           : 0;
 
-      // =======================================================
+      // -----------------------------------------------------
       // CURRENT WIN STREAK
-      // =======================================================
+      // -----------------------------------------------------
 
       let currentWinStreak = 0;
 
-      for (
-        let i = stats.matchResults.length - 1;
-        i >= 0;
-        i--
-      ) {
-        if (stats.matchResults[i].result === "W") {
-          currentWinStreak += 1;
-        } else {
+      for (let i = stats.matchResults.length - 1; i >= 0; i--) {
+        if (stats.matchResults[i].result !== "W") {
           break;
         }
+
+        currentWinStreak += 1;
       }
 
-      // =======================================================
+      // -----------------------------------------------------
       // PLAYER SCORE
-      //
-      // KEEPING YOUR EXISTING FORMULA UNCHANGED
-      // =======================================================
+      // -----------------------------------------------------
 
       stats.playerScore =
         stats.appearances * 0.5 +
         stats.winPoints +
         stats.regularGoals * 2 +
-        stats.penaltyGoals * 1 +
-        stats.assists * 1 +
+        stats.penaltyGoals +
+        stats.assists +
         stats.ownGoals * -1 +
         stats.yellowCards * -1 +
         stats.redCards * -2 +
         stats.defensivePoints;
 
-      // =======================================================
+      // -----------------------------------------------------
       // AVERAGE SCORE
-      // =======================================================
+      // -----------------------------------------------------
 
       const averageScore =
         stats.appearances > 0
-          ? Number(
-              (
-                stats.playerScore /
-                stats.appearances
-              ).toFixed(2)
-            )
+          ? Number((stats.playerScore / stats.appearances).toFixed(2))
           : 0;
 
-      // =======================================================
+      // -----------------------------------------------------
       // TEAM
-      // =======================================================
+      // -----------------------------------------------------
 
-      const team = playerTeamId
-        ? teamMap.get(playerTeamId)
-        : null;
+      const teamId = player.playsFor?.toString();
+
+      const team = teamId ? teamMap.get(teamId) : null;
+
+      // -----------------------------------------------------
+      // RETURN PLAYER
+      // -----------------------------------------------------
 
       return {
         ...player,
@@ -584,26 +443,15 @@ const getPlayers = async (req, res) => {
         stats: {
           appearances: stats.appearances,
 
+          participatedLast5,
+
           wins,
           draws,
           losses,
 
           winRate,
 
-          // Player's last 5 played-match results
           last5,
-
-          // Global last 5 matches attendance
-          participatedLast5,
-
-          // Global last 4 matches attendance
-          participatedLast4,
-
-          // active / inactive
-          status,
-
-          winsLast5,
-
           currentWinStreak,
 
           goals: stats.goals,
@@ -617,7 +465,6 @@ const getPlayers = async (req, res) => {
           yellowCards: stats.yellowCards,
           redCards: stats.redCards,
 
-          winPoints: stats.winPoints,
           defensivePoints: stats.defensivePoints,
 
           playerScore: stats.playerScore,
@@ -627,51 +474,66 @@ const getPlayers = async (req, res) => {
       };
     });
 
-    // =========================================================
-    // RANKING
-    // Highest average score = Rank 1
-    // Players with 0 appearances go to the bottom.
-    // =========================================================
+    // -------------------------------------------------------
+    // 8. RANK PLAYERS
+    // -------------------------------------------------------
 
     result.sort((a, b) => {
-      const avgA = a.stats.averageScore || 0;
-      const avgB = b.stats.averageScore || 0;
+      const averageDifference =
+        (b.stats.averageScore || 0) - (a.stats.averageScore || 0);
 
-      if (avgA !== avgB) {
-        return avgB - avgA;
+      if (averageDifference !== 0) {
+        return averageDifference;
       }
 
-      const scoreA = a.stats.playerScore || 0;
-      const scoreB = b.stats.playerScore || 0;
+      const scoreDifference =
+        (b.stats.playerScore || 0) - (a.stats.playerScore || 0);
 
-      if (scoreA !== scoreB) {
-        return scoreB - scoreA;
+      if (scoreDifference !== 0) {
+        return scoreDifference;
       }
 
-      return (
-        (b.stats.appearances || 0) -
-        (a.stats.appearances || 0)
-      );
+      return (b.stats.appearances || 0) - (a.stats.appearances || 0);
     });
 
-    // Add ranking after sorting
-    result.forEach((player, index) => {
-      player.stats.ranking =
-        player.stats.appearances > 0
-          ? index + 1
-          : null;
-    });
+    // -------------------------------------------------------
+    // 9. RESPONSE
+    // -------------------------------------------------------
 
-    // =========================================================
-    // RESPONSE
-    // =========================================================
-
-    res.status(200).json(result);
+    return res.status(200).json(result);
   } catch (error) {
     console.error("Get players error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       message: "Failed to get players",
+      error: error.message,
+    });
+  }
+};
+
+// ============================================================
+// UPDATE PLAYER
+// ============================================================
+
+const updatePlayer = async (req, res) => {
+  try {
+    const player = await Player.findByIdAndUpdate(req.params.id, req.body, {
+      new: true,
+      runValidators: true,
+    });
+
+    if (!player) {
+      return res.status(404).json({
+        message: "Player not found",
+      });
+    }
+
+    res.status(200).json(player);
+  } catch (error) {
+    console.error("Error updating player:", error);
+
+    res.status(500).json({
+      message: "Failed to update player",
       error: error.message,
     });
   }
