@@ -23,10 +23,48 @@ const getDefenderPoints = (goalsConceded) => {
   return 0;
 };
 
-// ============================================================
-// GET ALL PLAYERS WITH TEAM + STATISTICS
-// ============================================================
+// ADD  PLAYERS
+const addPlayer = async (req, res) => {
+  try {
+    const player = new Player(req.body);
+
+    const savedPlayer = await player.save();
+
+    res.status(201).json({
+      message: "Player added successfully",
+      player: savedPlayer,
+    });
+  } catch (error) {
+    console.error("Error adding player:", error.message);
+
+    res.status(400).json({
+      message: "Failed to add player",
+      error: error.message,
+    });
+  }
+};
+
+// GET ALL PLAYERS WITH TEAM
 const getPlayers = async (req, res) => {
+  try {
+    const players = await Player.find()
+      .populate("playsFor", "_id name logoLow")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return res.status(200).json(players);
+  } catch (error) {
+    console.error("Get opponent players error:", error);
+
+    return res.status(500).json({
+      message: "Failed to get opponent players",
+      error: error.message,
+    });
+  }
+};
+
+// GET ALL PLAYERS WITH TEAM + STATISTICS
+const getDetailedPlayers = async (req, res) => {
   try {
     // -------------------------------------------------------
     // 1. FETCH DATA
@@ -511,10 +549,7 @@ const getPlayers = async (req, res) => {
   }
 };
 
-// ============================================================
 // UPDATE PLAYER
-// ============================================================
-
 const updatePlayer = async (req, res) => {
   try {
     const player = await Player.findByIdAndUpdate(req.params.id, req.body, {
@@ -539,4 +574,4 @@ const updatePlayer = async (req, res) => {
   }
 };
 
-export { updatePlayer, getPlayers };
+export { updatePlayer, getDetailedPlayers, addPlayer, getPlayers };

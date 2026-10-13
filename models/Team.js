@@ -10,19 +10,20 @@ const teamSchema = new Schema(
 
     logoHigh: {
       type: String,
-      default: "",
+      required: true,
     },
 
     logoLow: {
       type: String,
-      default: "",
+      required: true,
     },
 
     shortForm: {
       type: String,
       required: true,
-      trim: true,
       uppercase: true,
+      trim: true,
+      maxlength: 3,
     },
 
     captain: {

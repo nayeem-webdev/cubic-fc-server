@@ -2,7 +2,44 @@ import Team from "../models/Team.js";
 import Player from "../models/Player.js";
 import Score from "../models/Score.js";
 
+const addTeams = async (req, res) => {
+  try {
+    const team = new Team(req.body);
+
+    const savedTeam = await team.save();
+
+    res.status(201).json({
+      message: "Team registered successfully",
+      team: savedTeam,
+    });
+  } catch (error) {
+    console.error("Error registering team:", error.message);
+
+    res.status(400).json({
+      message: "Failed to register team",
+      error: error.message,
+    });
+  }
+};
+
 const getTeams = async (req, res) => {
+  try {
+    const teams = await Team.find()
+      .populate("captain", "name position jerseyNumber photo")
+      .sort({ createdAt: -1 });
+
+    res.status(200).json(teams);
+  } catch (error) {
+    console.error("Error getting teams:", error.message);
+
+    res.status(500).json({
+      message: "Failed to get teams",
+      error: error.message,
+    });
+  }
+};
+
+const getTeamsDetails = async (req, res) => {
   try {
     const teams = await Team.find({})
       .populate("captain", "_id name photo jerseyNumber position")
@@ -81,4 +118,4 @@ const getTeams = async (req, res) => {
   }
 };
 
-export { getTeams };
+export { getTeams, addTeams, getTeamsDetails };

@@ -4,11 +4,7 @@ import express from "express";
 import cors from "cors";
 import mongoose from "mongoose";
 
-import Player from "./models/Player.js";
-import Schedule from "./models/Schedule.js";
-import Team from "./models/Team.js";
 import Venue from "./models/Venue.js";
-import Score from "./models/Score.js";
 
 import {
   addMatch,
@@ -18,9 +14,32 @@ import {
   patchMatch,
 } from "./controllers/matchController.js";
 import { adminLogin } from "./controllers/authController.js";
-import { getPlayers } from "./controllers/playerController.js";
+import {
+  addPlayer,
+  getPlayers,
+  getDetailedPlayers,
+  updatePlayer,
+} from "./controllers/playerController.js";
+import {
+  getOpponentTeams,
+  addOpponentTeams,
+  getOpponentTeamsDetails,
+  addOpponentPlayer,
+  updateOpponentPlayer,
+  getOpponentPlayers,
+} from "./controllers/opponentController.js";
 import { getScores, postScore } from "./controllers/scoreController.js";
-import { getTeams } from "./controllers/TeamController.js";
+import {
+  addTeams,
+  getTeams,
+  getTeamsDetails,
+} from "./controllers/teamController.js";
+import {
+  createSchedule,
+  getSchedules,
+  deleteSchedule,
+  updateSchedule,
+} from "./controllers/scheduleController.js";
 
 const app = express();
 
@@ -34,106 +53,75 @@ app.get("/", (req, res) => {
   });
 });
 
+// Auth API
+app.post("/api/auth/login", adminLogin);
+
 // ===============================
 // PLAYER API
 // ===============================
 
-app.post("/api/auth/login", adminLogin);
-
 // POST - Add a new player
-app.post("/api/players", async (req, res) => {
-  try {
-    const player = new Player(req.body);
-
-    const savedPlayer = await player.save();
-
-    res.status(201).json({
-      message: "Player added successfully",
-      player: savedPlayer,
-    });
-  } catch (error) {
-    console.error("Error adding player:", error.message);
-
-    res.status(400).json({
-      message: "Failed to add player",
-      error: error.message,
-    });
-  }
-});
+app.post("/api/players", addPlayer);
 
 // GET - Get All Players
 app.get("/api/players", getPlayers);
 
+// GET - Get All Players with Details
+app.get("/api/player-details", getDetailedPlayers);
+
 // UPDATE - Update Player
-app.patch("/api/players/:id", async (req, res) => {
-  try {
-    const player = await Player.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
-      runValidators: true,
-    });
+app.patch("/api/players/:id", updatePlayer);
 
-    if (!player) {
-      return res.status(404).json({
-        message: "Player not found",
-      });
-    }
+// ===============================
+// TEAMS API
+// ===============================
 
-    res.status(200).json(player);
-  } catch (error) {
-    console.error("Error updating player:", error);
+// POST - Register Team
+app.post("/api/teams", addTeams);
 
-    res.status(500).json({
-      message: "Failed to update player",
-      error: error.message,
-    });
-  }
-});
+// GET - Get All Teams
+app.get("/api/teams", getTeams);
+
+// GET - Teams, stats
+app.get("/api/teams-details", getTeamsDetails);
+
+// ===============================
+// OPPONENT PLAYER API
+// ===============================
+
+// POST - Add a new player
+app.post("/api/opponent-players", addOpponentPlayer);
+
+// GET - Get All Players
+app.get("/api/opponent-players", getOpponentPlayers);
+
+// UPDATE - Update Player
+app.patch("/api/opponent-players/:id", updateOpponentPlayer);
+
+// POST - Register Opponent
+app.post("/api/opponent-teams", addOpponentTeams);
+
+// GET - Get All Opponent
+app.get("/api/opponent-teams", getOpponentTeams);
+
+// GET - Opponent, stats
+app.get("/api/opponent-teams-details", getOpponentTeamsDetails);
+
+// ===============================
+// SCHEDULE API
+// ===============================
 
 // POST - Add a new Schedule
-app.post("/api/schedule", async (req, res) => {
-  try {
-    const schedule = new Schedule(req.body);
-
-    const savedSchedule = await schedule.save();
-
-    res.status(201).json({
-      message: "Schedule added successfully",
-      schedule: savedSchedule,
-    });
-  } catch (error) {
-    console.error("Error adding schedule:", error.message);
-
-    res.status(400).json({
-      message: "Failed to add schedule",
-      error: error.message,
-    });
-  }
-});
+app.post("/api/schedule", createSchedule);
 
 // GET - Get All Schedules
-app.get("/api/schedules", async (req, res) => {
-  try {
-    const schedules = await Schedule.find().populate("venue").sort({ date: 1 });
-    const todayBD = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Asia/Dhaka",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(new Date());
+app.get("/api/schedules", getSchedules);
 
-    const filteredSchedules = schedules.filter((schedule) => {
-      return schedule.date >= todayBD;
-    });
-    res.status(200).json(filteredSchedules);
-  } catch (error) {
-    console.error("Error fetching schedules:", error);
+// DELETE - Delete Schedules
+app.delete("/api/schedules/:id", deleteSchedule);
 
-    res.status(500).json({
-      message: "Failed to fetch schedules",
-      error: error.message,
-    });
-  }
-});
+// UPDATE - Update Schedules
+app.patch("/api/schedules/:id", updateSchedule);
 
 // POST /api/venues
 app.post("/api/venues", async (req, res) => {
@@ -183,26 +171,9 @@ app.get("/api/venues", async (req, res) => {
   }
 });
 
-// POST - Register Team
-app.post("/api/teams", async (req, res) => {
-  try {
-    const team = new Team(req.body);
-
-    const savedTeam = await team.save();
-
-    res.status(201).json({
-      message: "Team registered successfully",
-      team: savedTeam,
-    });
-  } catch (error) {
-    console.error("Error registering team:", error.message);
-
-    res.status(400).json({
-      message: "Failed to register team",
-      error: error.message,
-    });
-  }
-});
+// ===============================
+// MATCH API
+// ===============================
 
 // POST - Add a new Match
 app.post("/api/matches", addMatch);
@@ -218,61 +189,16 @@ app.get("/api/matches/:id", getSingleMatch);
 
 // PATCH - Update an existing Match
 app.patch("/api/matches/:id", patchMatch);
+
+// ===============================
+// SCORE API
+// ===============================
+
 // POST - Save completed match score
 app.post("/api/scores", postScore);
 
 // GET - Get all saved match scores
 app.get("/api/scores", getScores);
-
-// GET - Match score summary
-app.get("/api/scores/summary", async (req, res) => {
-  try {
-    const scores = await Score.find()
-      .select("_id match homeTeam awayTeam homeScore awayScore finishedAt")
-      .populate({
-        path: "homeTeam",
-        select: "_id name shortForm logoLow",
-      })
-      .populate({
-        path: "awayTeam",
-        select: "_id name shortForm logoLow",
-      })
-      .sort({ finishedAt: -1 });
-
-    res.status(200).json({
-      success: true,
-      scores,
-    });
-  } catch (error) {
-    console.error("Error fetching score summaries:", error);
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch match score summaries",
-    });
-  }
-});
-
-// GET - Teams, stats
-app.get("/api/teams-details", getTeams);
-
-// GET - Get All Teams
-app.get("/api/teams", async (req, res) => {
-  try {
-    const teams = await Team.find()
-      .populate("captain", "name position jerseyNumber photo")
-      .sort({ createdAt: -1 });
-
-    res.status(200).json(teams);
-  } catch (error) {
-    console.error("Error getting teams:", error.message);
-
-    res.status(500).json({
-      message: "Failed to get teams",
-      error: error.message,
-    });
-  }
-});
 
 // ===============================
 // CONNECT TO MONGODB
