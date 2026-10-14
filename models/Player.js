@@ -42,7 +42,7 @@ const playerSchema = new Schema(
     },
     status: {
       type: String,
-      enum: ["active", "inactive", "retired"],
+      enum: ["active", "inactive", "retired", "backup"],
       default: "active",
       required: true,
     },

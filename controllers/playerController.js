@@ -574,4 +574,25 @@ const updatePlayer = async (req, res) => {
   }
 };
 
-export { updatePlayer, getDetailedPlayers, addPlayer, getPlayers };
+const deletePlayer = async (req, res) => {
+  try {
+    const player = await Player.findByIdAndDelete(req.params.id);
+
+    if (!player) {
+      return res.status(404).json({ message: "Player not found" });
+    }
+
+    return res.status(200).json({ message: "Player deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting player:", error);
+    return res.status(500).json({ message: "Server error deleting player" });
+  }
+};
+
+export {
+  updatePlayer,
+  getDetailedPlayers,
+  addPlayer,
+  getPlayers,
+  deletePlayer,
+};

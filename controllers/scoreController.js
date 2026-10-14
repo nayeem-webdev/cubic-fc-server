@@ -1,4 +1,10 @@
+import Match from "../models/Match.js";
+import OpponentPlayer from "../models/OpponentPlayer.js";
+import OpponentTeam from "../models/OpponentTeam.js";
+import Player from "../models/Player.js";
+import Schedule from "../models/Schedule.js";
 import Score from "../models/Score.js";
+import Team from "../models/Team.js";
 
 const postScore = async (req, res) => {
   try {
@@ -63,68 +69,237 @@ const postScore = async (req, res) => {
 
 const getScores = async (req, res) => {
   try {
-    const scores = await Score.find()
-      // Populate Match
-      .populate({
-        path: "match",
-        select:
-          "_id matchSchedule matchType matchTime playersPerTeam homeStartingPlayers homeSubstitutes awayStartingPlayers awaySubstitutes",
+    // ==========================================
+    // 1. GET SCORES
+    // ==========================================
 
-        populate: [
-          // Populate Match Schedule
-          {
-            path: "matchSchedule",
-            select: "date venue matchType",
-            populate: {
-              path: "venue",
-              select: "venue",
-            },
-          },
+    const scores = await Score.find().sort({ finishedAt: -1 }).lean();
 
-          // Populate Home Starting Players
-          {
-            path: "homeStartingPlayers",
-            select: "_id name jerseyNumber photo position",
-          },
+    if (!scores.length) {
+      return res.status(200).json({
+        success: true,
+        scores: [],
+      });
+    }
 
-          // Populate Home Substitutes
-          {
-            path: "homeSubstitutes",
-            select: "_id name jerseyNumber photo position",
-          },
+    // ==========================================
+    // 2. GET MATCH IDS
+    // ==========================================
 
-          // Populate Away Starting Players
-          {
-            path: "awayStartingPlayers",
-            select: "_id name jerseyNumber photo position",
-          },
+    const matchIds = scores.map((score) => score.match).filter(Boolean);
 
-          // Populate Away Substitutes
-          {
-            path: "awaySubstitutes",
-            select: "_id name jerseyNumber photo position",
-          },
-        ],
+    // Get matches WITHOUT populating players or teams
+    const matches = await Match.find({
+      _id: { $in: matchIds },
+    })
+      .select(
+        "_id matchSchedule matchType matchTime playersPerTeam homeStartingPlayers homeSubstitutes awayStartingPlayers awaySubstitutes",
+      )
+      .lean();
+
+    // ==========================================
+    // 3. CREATE MATCH MAP
+    // ==========================================
+
+    const matchMap = new Map(
+      matches.map((match) => [match._id.toString(), match]),
+    );
+
+    // ==========================================
+    // 4. COLLECT TEAM IDS
+    // ==========================================
+
+    const teamIds = [];
+
+    scores.forEach((score) => {
+      if (score.homeTeam) {
+        teamIds.push(score.homeTeam.toString());
+      }
+
+      if (score.awayTeam) {
+        teamIds.push(score.awayTeam.toString());
+      }
+    });
+
+    const uniqueTeamIds = [...new Set(teamIds)];
+
+    // ==========================================
+    // 5. COLLECT PLAYER IDS
+    // ==========================================
+
+    const playerIds = [];
+
+    matches.forEach((match) => {
+      [
+        ...(match.homeStartingPlayers || []),
+        ...(match.homeSubstitutes || []),
+        ...(match.awayStartingPlayers || []),
+        ...(match.awaySubstitutes || []),
+      ].forEach((playerId) => {
+        if (playerId) {
+          playerIds.push(playerId.toString());
+        }
+      });
+    });
+
+    const uniquePlayerIds = [...new Set(playerIds)];
+
+    // ==========================================
+    // 6. FIND TEAMS IN BOTH COLLECTIONS
+    // ==========================================
+
+    const [clubTeams, externalTeams] = await Promise.all([
+      Team.find({
+        _id: {
+          $in: uniqueTeamIds,
+        },
       })
+        .select("_id name shortForm logoLow logoHigh")
+        .lean(),
 
-      // Populate Home Team
-      .populate({
-        path: "homeTeam",
-        select: "_id name shortForm logoLow logoHigh",
+      OpponentTeam.find({
+        _id: {
+          $in: uniqueTeamIds,
+        },
       })
+        .select("_id name shortForm logoLow logoHigh")
+        .lean(),
+    ]);
 
-      // Populate Away Team
-      .populate({
-        path: "awayTeam",
-        select: "_id name shortForm logoLow logoHigh",
+    // ==========================================
+    // 7. FIND PLAYERS IN BOTH COLLECTIONS
+    // ==========================================
+
+    const [clubPlayers, externalPlayers] = await Promise.all([
+      Player.find({
+        _id: {
+          $in: uniquePlayerIds,
+        },
       })
+        .select("_id name jerseyNumber photo position")
+        .lean(),
 
-      // Latest finished match first
-      .sort({ finishedAt: -1 });
+      OpponentPlayer.find({
+        _id: {
+          $in: uniquePlayerIds,
+        },
+      })
+        .select("_id name jerseyNumber photo position")
+        .lean(),
+    ]);
+
+    // ==========================================
+    // 8. CREATE LOOKUP MAPS
+    // ==========================================
+
+    const allTeams = [...clubTeams, ...externalTeams];
+
+    const allPlayers = [...clubPlayers, ...externalPlayers];
+
+    const teamMap = new Map(
+      allTeams.map((team) => [team._id.toString(), team]),
+    );
+
+    const playerMap = new Map(
+      allPlayers.map((player) => [player._id.toString(), player]),
+    );
+
+    // ==========================================
+    // 9. GET SCHEDULES
+    // ==========================================
+
+    const scheduleIds = matches
+      .map((match) => match.matchSchedule)
+      .filter(Boolean)
+      .map((id) => id.toString());
+
+    const uniqueScheduleIds = [...new Set(scheduleIds)];
+
+    const schedules = await Schedule.find({
+      _id: {
+        $in: uniqueScheduleIds,
+      },
+    })
+      .select("_id date venue matchType")
+      .populate({
+        path: "venue",
+        select: "_id venue",
+      })
+      .lean();
+
+    const scheduleMap = new Map(
+      schedules.map((schedule) => [schedule._id.toString(), schedule]),
+    );
+
+    // ==========================================
+    // 10. BUILD FINAL RESPONSE
+    // ==========================================
+
+    const finalScores = scores.map((score) => {
+      const match = score.match ? matchMap.get(score.match.toString()) : null;
+
+      // ------------------------------
+      // TEAMS
+      // ------------------------------
+
+      const homeTeam = score.homeTeam
+        ? teamMap.get(score.homeTeam.toString()) || null
+        : null;
+
+      const awayTeam = score.awayTeam
+        ? teamMap.get(score.awayTeam.toString()) || null
+        : null;
+
+      // ------------------------------
+      // MATCH PLAYERS
+      // ------------------------------
+
+      let populatedMatch = null;
+
+      if (match) {
+        populatedMatch = {
+          ...match,
+
+          matchSchedule: match.matchSchedule
+            ? scheduleMap.get(match.matchSchedule.toString()) || null
+            : null,
+
+          homeStartingPlayers: (match.homeStartingPlayers || [])
+            .map((id) => playerMap.get(id.toString()))
+            .filter(Boolean),
+
+          homeSubstitutes: (match.homeSubstitutes || [])
+            .map((id) => playerMap.get(id.toString()))
+            .filter(Boolean),
+
+          awayStartingPlayers: (match.awayStartingPlayers || [])
+            .map((id) => playerMap.get(id.toString()))
+            .filter(Boolean),
+
+          awaySubstitutes: (match.awaySubstitutes || [])
+            .map((id) => playerMap.get(id.toString()))
+            .filter(Boolean),
+        };
+      }
+
+      return {
+        ...score,
+
+        homeTeam,
+
+        awayTeam,
+
+        match: populatedMatch,
+      };
+    });
+
+    // ==========================================
+    // 11. RESPONSE
+    // ==========================================
 
     res.status(200).json({
       success: true,
-      scores,
+      scores: finalScores,
     });
   } catch (error) {
     console.error("Error fetching scores:", error);

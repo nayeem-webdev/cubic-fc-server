@@ -4,8 +4,7 @@ import express from "express";
 import cors from "cors";
 import mongoose from "mongoose";
 
-import Venue from "./models/Venue.js";
-
+import { adminLogin } from "./controllers/authController.js";
 import {
   addMatch,
   deleteMatch,
@@ -13,12 +12,12 @@ import {
   getUpcomingMatches,
   patchMatch,
 } from "./controllers/matchController.js";
-import { adminLogin } from "./controllers/authController.js";
 import {
   addPlayer,
   getPlayers,
   getDetailedPlayers,
   updatePlayer,
+  deletePlayer,
 } from "./controllers/playerController.js";
 import {
   getOpponentTeams,
@@ -27,6 +26,7 @@ import {
   addOpponentPlayer,
   updateOpponentPlayer,
   getOpponentPlayers,
+  deleteOpponentPlayer,
 } from "./controllers/opponentController.js";
 import { getScores, postScore } from "./controllers/scoreController.js";
 import {
@@ -40,6 +40,7 @@ import {
   deleteSchedule,
   updateSchedule,
 } from "./controllers/scheduleController.js";
+import { addVenue, getVenue } from "./controllers/venueController.js";
 
 const app = express();
 
@@ -71,6 +72,9 @@ app.get("/api/player-details", getDetailedPlayers);
 
 // UPDATE - Update Player
 app.patch("/api/players/:id", updatePlayer);
+
+// DELETE - Delete Player
+app.delete("/api/players/:id", deletePlayer);
 
 // ===============================
 // TEAMS API
@@ -104,6 +108,9 @@ app.post("/api/opponent-teams", addOpponentTeams);
 // GET - Get All Opponent
 app.get("/api/opponent-teams", getOpponentTeams);
 
+// DELETE - Delete Player
+app.delete("/api/opponent-players/:id", deleteOpponentPlayer);
+
 // GET - Opponent, stats
 app.get("/api/opponent-teams-details", getOpponentTeamsDetails);
 
@@ -123,53 +130,15 @@ app.delete("/api/schedules/:id", deleteSchedule);
 // UPDATE - Update Schedules
 app.patch("/api/schedules/:id", updateSchedule);
 
-// POST /api/venues
-app.post("/api/venues", async (req, res) => {
-  try {
-    const { venue, direction } = req.body;
+// ===============================
+// VENUE API
+// ===============================
 
-    if (!venue || !direction) {
-      return res.status(400).json({
-        message: "Venue and direction are required",
-      });
-    }
+// POST - Add a new Venue
+app.post("/api/venues", addVenue);
 
-    const newVenue = new Venue({
-      venue,
-      direction,
-    });
-
-    const savedVenue = await newVenue.save();
-
-    res.status(201).json({
-      message: "Venue added successfully",
-      venue: savedVenue,
-    });
-  } catch (error) {
-    console.error("Error adding venue:", error);
-
-    res.status(400).json({
-      message: "Failed to add venue",
-      error: error.message,
-    });
-  }
-});
-
-// GET /api/venues
-app.get("/api/venues", async (req, res) => {
-  try {
-    const venues = await Venue.find().sort({ venue: 1 });
-
-    res.status(200).json(venues);
-  } catch (error) {
-    console.error("Error fetching venues:", error);
-
-    res.status(500).json({
-      message: "Failed to fetch venues",
-      error: error.message,
-    });
-  }
-});
+// GET - Get All Venue
+app.get("/api/venues", getVenue);
 
 // ===============================
 // MATCH API

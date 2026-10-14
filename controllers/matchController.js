@@ -21,60 +21,155 @@ const addMatch = async (req, res) => {
   }
 };
 
-// get All Upcoming & Recent Matches (Yesterday and later)
 const getUpcomingMatches = async (req, res) => {
   try {
     const now = new Date();
 
-    // Calculate yesterday's date in Asia/Dhaka time zone (YYYY-MM-DD)
+    // Calculate yesterday's date in Asia/Dhaka time zone
     const yesterday = new Intl.DateTimeFormat("en-CA", {
       timeZone: "Asia/Dhaka",
     }).format(new Date(now.getTime() - 24 * 60 * 60 * 1000));
 
-    // Get Schedule IDs from yesterday onwards
-    const scheduleIds = await Match.db
-      .model("Schedule")
-      .find({
-        date: {
-          $gte: yesterday, // Greater than or equal to yesterday
-        },
-      })
-      .distinct("_id");
+    // Models
+    const Schedule = Match.db.model("Schedule");
+    const Team = Match.db.model("Team");
+    const Player = Match.db.model("Player");
+    const OpponentTeam = Match.db.model("OpponentTeam");
+    const OpponentPlayer = Match.db.model("OpponentPlayer");
 
-    // Get matches matching those schedules
+    // Get schedules from yesterday onwards
+    const scheduleIds = await Schedule.find({
+      date: {
+        $gte: yesterday,
+      },
+    }).distinct("_id");
+
+    // Get matches
     const matches = await Match.find({
-      matchSchedule: { $in: scheduleIds },
-    })
-      .populate("homeTeam", "_id name logoLow")
-      .populate("awayTeam", "_id name logoLow")
-      .populate({
-        path: "matchSchedule",
-        select: "_id venue date time matchFormat matchType",
-        populate: {
-          path: "venue",
-          select: "_id venue",
-        },
-      })
-      .populate("homeStartingPlayers", "_id name photo jerseyNumber position")
-      .populate("homeSubstitutes", "_id name photo jerseyNumber position")
-      .populate("awayStartingPlayers", "_id name photo jerseyNumber position")
-      .populate("awaySubstitutes", "_id name photo jerseyNumber position");
+      matchSchedule: {
+        $in: scheduleIds,
+      },
+    }).lean();
 
-    // Sort in memory by date and time (ascending) since populated fields can't be sorted directly in MongoDB `.sort()`
-    matches.sort((a, b) => {
+    // Get all IDs used by matches
+    const teamIds = [];
+
+    const playerIds = [];
+
+    matches.forEach((match) => {
+      if (match.homeTeam) teamIds.push(match.homeTeam);
+      if (match.awayTeam) teamIds.push(match.awayTeam);
+
+      [
+        ...(match.homeStartingPlayers || []),
+        ...(match.homeSubstitutes || []),
+        ...(match.awayStartingPlayers || []),
+        ...(match.awaySubstitutes || []),
+      ].forEach((id) => {
+        if (id) playerIds.push(id);
+      });
+    });
+
+    // Remove duplicate IDs
+    const uniqueTeamIds = [...new Set(teamIds.map((id) => id.toString()))];
+
+    const uniquePlayerIds = [...new Set(playerIds.map((id) => id.toString()))];
+
+    // Fetch teams from BOTH collections
+    const [teams, opponentTeams] = await Promise.all([
+      Team.find({
+        _id: {
+          $in: uniqueTeamIds,
+        },
+      }).select("_id name logoLow"),
+
+      OpponentTeam.find({
+        _id: {
+          $in: uniqueTeamIds,
+        },
+      }).select("_id name logoLow"),
+    ]);
+
+    // Fetch players from BOTH collections
+    const [players, opponentPlayers] = await Promise.all([
+      Player.find({
+        _id: {
+          $in: uniquePlayerIds,
+        },
+      }).select("_id name photo jerseyNumber position"),
+
+      OpponentPlayer.find({
+        _id: {
+          $in: uniquePlayerIds,
+        },
+      }).select("_id name photo jerseyNumber position"),
+    ]);
+
+    // Combine them
+    const allTeams = [...teams, ...opponentTeams];
+    const allPlayers = [...players, ...opponentPlayers];
+
+    // Create quick lookup maps
+    const teamMap = new Map(
+      allTeams.map((team) => [team._id.toString(), team]),
+    );
+
+    const playerMap = new Map(
+      allPlayers.map((player) => [player._id.toString(), player]),
+    );
+
+    // Populate schedule information
+    const populatedMatches = await Match.populate(matches, {
+      path: "matchSchedule",
+      select: "_id venue date time matchFormat matchType",
+      populate: {
+        path: "venue",
+        select: "_id venue",
+      },
+    });
+
+    // Manually populate teams and players
+    populatedMatches.forEach((match) => {
+      // Teams
+      match.homeTeam = teamMap.get(match.homeTeam?.toString()) || null;
+
+      match.awayTeam = teamMap.get(match.awayTeam?.toString()) || null;
+
+      // Players
+      match.homeStartingPlayers = (match.homeStartingPlayers || [])
+        .map((id) => playerMap.get(id.toString()))
+        .filter(Boolean);
+
+      match.homeSubstitutes = (match.homeSubstitutes || [])
+        .map((id) => playerMap.get(id.toString()))
+        .filter(Boolean);
+
+      match.awayStartingPlayers = (match.awayStartingPlayers || [])
+        .map((id) => playerMap.get(id.toString()))
+        .filter(Boolean);
+
+      match.awaySubstitutes = (match.awaySubstitutes || [])
+        .map((id) => playerMap.get(id.toString()))
+        .filter(Boolean);
+    });
+
+    // Sort by schedule date/time
+    populatedMatches.sort((a, b) => {
       const dateA = new Date(
         `${a.matchSchedule?.date}T${a.matchSchedule?.time || "00:00"}`,
       );
+
       const dateB = new Date(
         `${b.matchSchedule?.date}T${b.matchSchedule?.time || "00:00"}`,
       );
+
       return dateA - dateB;
     });
 
     res.json({
       success: true,
-      count: matches.length,
-      matches,
+      count: populatedMatches.length,
+      matches: populatedMatches,
     });
   } catch (error) {
     console.error("Error fetching matches from yesterday onwards:", error);
@@ -88,34 +183,132 @@ const getUpcomingMatches = async (req, res) => {
 };
 
 // GET - Get one match by ID with populated teams, schedule and players
+
 const getSingleMatch = async (req, res) => {
   try {
-    const match = await Match.findById(req.params.id)
-      .populate("homeTeam")
-      .populate("awayTeam")
-      .populate({
-        path: "matchSchedule",
-        populate: { path: "venue" },
-      })
-      .populate("homeStartingPlayers")
-      .populate("homeSubstitutes")
-      .populate("awayStartingPlayers")
-      .populate("awaySubstitutes");
+    // Get models
+    const Team = Match.db.model("Team");
+    const OpponentTeam = Match.db.model("OpponentTeam");
+    const Player = Match.db.model("Player");
+    const OpponentPlayer = Match.db.model("OpponentPlayer");
+
+    const Schedule = Match.db.model("Schedule");
+    const Venue = Match.db.model("Venue");
+
+    // Fetch match without populating teams or players
+    const match = await Match.findById(req.params.id).lean();
 
     if (!match) {
       return res.status(404).json({
+        success: false,
         message: "Match not found",
       });
     }
 
-    res.status(200).json({
+    // Collect team IDs
+    const teamIds = [match.homeTeam, match.awayTeam]
+      .filter(Boolean)
+      .map((id) => id.toString());
+
+    // Collect player IDs
+    const playerIds = [
+      ...(match.homeStartingPlayers || []),
+      ...(match.homeSubstitutes || []),
+      ...(match.awayStartingPlayers || []),
+      ...(match.awaySubstitutes || []),
+    ]
+      .filter(Boolean)
+      .map((id) => id.toString());
+
+    // Fetch club and opponent teams
+    const [clubTeams, opponentTeams] = await Promise.all([
+      Team.find({ _id: { $in: teamIds } })
+        .select("_id name shortForm logoLow logoHigh")
+        .lean(),
+
+      OpponentTeam.find({ _id: { $in: teamIds } })
+        .select("_id name shortForm logoLow logoHigh")
+        .lean(),
+    ]);
+
+    // Fetch club and opponent players
+    const [clubPlayers, opponentPlayers] = await Promise.all([
+      Player.find({ _id: { $in: playerIds } })
+        .select("_id name jerseyNumber photo position foot playsFor")
+        .lean(),
+
+      OpponentPlayer.find({ _id: { $in: playerIds } })
+        .select("_id name jerseyNumber photo position playsFor")
+        .lean(),
+    ]);
+
+    // Create lookup maps
+    const teamMap = new Map(
+      [...clubTeams, ...opponentTeams].map((team) => [
+        team._id.toString(),
+        team,
+      ]),
+    );
+
+    const playerMap = new Map(
+      [...clubPlayers, ...opponentPlayers].map((player) => [
+        player._id.toString(),
+        player,
+      ]),
+    );
+
+    // Populate schedule and venue
+    let populatedSchedule = null;
+
+    if (match.matchSchedule) {
+      populatedSchedule = await Schedule.findById(match.matchSchedule)
+        .populate({
+          path: "venue",
+          select: "_id venue",
+        })
+        .lean();
+    }
+
+    // Return populated match
+    const populatedMatch = {
+      ...match,
+
+      homeTeam: match.homeTeam
+        ? teamMap.get(match.homeTeam.toString()) || null
+        : null,
+
+      awayTeam: match.awayTeam
+        ? teamMap.get(match.awayTeam.toString()) || null
+        : null,
+
+      matchSchedule: populatedSchedule,
+
+      homeStartingPlayers: (match.homeStartingPlayers || [])
+        .map((id) => playerMap.get(id.toString()))
+        .filter(Boolean),
+
+      homeSubstitutes: (match.homeSubstitutes || [])
+        .map((id) => playerMap.get(id.toString()))
+        .filter(Boolean),
+
+      awayStartingPlayers: (match.awayStartingPlayers || [])
+        .map((id) => playerMap.get(id.toString()))
+        .filter(Boolean),
+
+      awaySubstitutes: (match.awaySubstitutes || [])
+        .map((id) => playerMap.get(id.toString()))
+        .filter(Boolean),
+    };
+
+    return res.status(200).json({
       success: true,
-      match,
+      match: populatedMatch,
     });
   } catch (error) {
-    console.error("Error fetching match:", error.message);
+    console.error("Error fetching match:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
+      success: false,
       message: "Failed to fetch match",
       error: error.message,
     });
