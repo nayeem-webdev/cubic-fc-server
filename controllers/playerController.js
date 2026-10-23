@@ -182,8 +182,9 @@ const getDetailedPlayers = async (req, res) => {
     // -------------------------------------------------------
 
     const [players, teams, matches, scores] = await Promise.all([
-      Player.find().sort({ createdAt: -1 }).lean(),
-
+      Player.find({ status: { $ne: "backup" } })
+        .sort({ createdAt: -1 })
+        .lean(),
       Team.find().select("_id name logoLow").lean(),
 
       Match.find()
