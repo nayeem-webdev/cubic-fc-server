@@ -312,4 +312,726 @@ const getScores = async (req, res) => {
   }
 };
 
-export { getScores, postScore };
+const getScoreSummary = async (req, res) => {
+  try {
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const limit = 5;
+    const skip = (page - 1) * limit;
+
+    // ==========================================
+    // 1. GET PAGINATED SCORES
+    // ==========================================
+
+    const [scores, totalScores] = await Promise.all([
+      Score.find().sort({ finishedAt: -1 }).skip(skip).limit(limit).lean(),
+
+      Score.countDocuments(),
+    ]);
+
+    if (!scores.length) {
+      return res.status(200).json({
+        success: true,
+        scores: [],
+        pagination: {
+          currentPage: page,
+          totalPages: 0,
+          totalItems: totalScores,
+          hasNextPage: false,
+          hasPreviousPage: page > 1,
+        },
+      });
+    }
+
+    // ==========================================
+    // 2. GET MATCH IDS
+    // ==========================================
+
+    const matchIds = scores.map((score) => score.match).filter(Boolean);
+
+    const matches = await Match.find({
+      _id: { $in: matchIds },
+    })
+      .select("_id matchSchedule matchType matchTime")
+      .lean();
+
+    const matchMap = new Map(
+      matches.map((match) => [match._id.toString(), match]),
+    );
+
+    // ==========================================
+    // 3. GET TEAM IDS
+    // ==========================================
+
+    const teamIds = [];
+
+    scores.forEach((score) => {
+      if (score.homeTeam) {
+        teamIds.push(score.homeTeam.toString());
+      }
+
+      if (score.awayTeam) {
+        teamIds.push(score.awayTeam.toString());
+      }
+    });
+
+    const uniqueTeamIds = [...new Set(teamIds)];
+
+    // ==========================================
+    // 4. GET TEAMS
+    // ==========================================
+
+    const [clubTeams, opponentTeams] = await Promise.all([
+      Team.find({
+        _id: { $in: uniqueTeamIds },
+      })
+        .select("_id name logoLow")
+        .lean(),
+
+      OpponentTeam.find({
+        _id: { $in: uniqueTeamIds },
+      })
+        .select("_id name logoLow")
+        .lean(),
+    ]);
+
+    const allTeams = [...clubTeams, ...opponentTeams];
+
+    const teamMap = new Map(
+      allTeams.map((team) => [team._id.toString(), team]),
+    );
+
+    // ==========================================
+    // 5. GET SCHEDULES
+    // ==========================================
+
+    const scheduleIds = matches
+      .map((match) => match.matchSchedule)
+      .filter(Boolean)
+      .map((id) => id.toString());
+
+    const uniqueScheduleIds = [...new Set(scheduleIds)];
+
+    const schedules = await Schedule.find({
+      _id: { $in: uniqueScheduleIds },
+    })
+      .select("_id date venue matchType")
+      .populate({
+        path: "venue",
+        select: "_id venue",
+      })
+      .lean();
+
+    const scheduleMap = new Map(
+      schedules.map((schedule) => [schedule._id.toString(), schedule]),
+    );
+
+    // ==========================================
+    // 6. BUILD SUMMARY
+    // ==========================================
+
+    const finalScores = scores.map((score) => {
+      const match = score.match ? matchMap.get(score.match.toString()) : null;
+
+      const homeTeam = score.homeTeam
+        ? teamMap.get(score.homeTeam.toString()) || null
+        : null;
+
+      const awayTeam = score.awayTeam
+        ? teamMap.get(score.awayTeam.toString()) || null
+        : null;
+
+      const schedule = match?.matchSchedule
+        ? scheduleMap.get(match.matchSchedule.toString()) || null
+        : null;
+
+      return {
+        _id: score._id,
+
+        matchType: match?.matchType || "training",
+        matchTime: match?.matchTime || null,
+
+        homeScore: score.homeScore,
+        awayScore: score.awayScore,
+
+        homeTeam: homeTeam
+          ? {
+              _id: homeTeam._id,
+              name: homeTeam.name,
+              logoLow: homeTeam.logoLow,
+            }
+          : null,
+
+        awayTeam: awayTeam
+          ? {
+              _id: awayTeam._id,
+              name: awayTeam.name,
+              logoLow: awayTeam.logoLow,
+            }
+          : null,
+
+        date: schedule?.date || null,
+
+        venue: schedule?.venue
+          ? {
+              _id: schedule.venue._id,
+              venue: schedule.venue.venue,
+            }
+          : null,
+      };
+    });
+
+    // ==========================================
+    // 7. RESPONSE
+    // ==========================================
+
+    const totalPages = Math.ceil(totalScores / limit);
+
+    return res.status(200).json({
+      success: true,
+
+      scores: finalScores,
+
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalItems: totalScores,
+        limit,
+
+        hasNextPage: page < totalPages,
+        hasPreviousPage: page > 1,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching score summary:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch score summary",
+      error: error.message,
+    });
+  }
+};
+
+const getSimpleScores = async (req, res) => {
+  try {
+    const scores = await Score.find()
+      .sort({ finishedAt: -1 })
+      .populate({
+        path: "match",
+        select: "homeTeam awayTeam matchTime matchSchedule",
+        populate: [
+          {
+            path: "homeTeam",
+            select: "name",
+          },
+          {
+            path: "awayTeam",
+            select: "name",
+          },
+          {
+            path: "matchSchedule",
+          },
+        ],
+      })
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      scores,
+    });
+  } catch (error) {
+    console.error("Failed to get scores:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to get scores",
+      error: error.message,
+    });
+  }
+};
+
+const getScoreById = async (req, res) => {
+  try {
+    // ==========================================
+    // 1. GET SCORE BY ID
+    // ==========================================
+
+    const { id } = req.params;
+
+    const score = await Score.findById(id).lean();
+
+    if (!score) {
+      return res.status(404).json({
+        success: false,
+        message: "Score not found",
+      });
+    }
+
+    // ==========================================
+    // 2. GET MATCH
+    // ==========================================
+
+    const match = score.match
+      ? await Match.findById(score.match)
+          .select(
+            "_id matchSchedule matchType matchTime playersPerTeam homeStartingPlayers homeSubstitutes awayStartingPlayers awaySubstitutes",
+          )
+          .lean()
+      : null;
+
+    // ==========================================
+    // 3. COLLECT TEAM IDS
+    // ==========================================
+
+    const teamIds = [];
+
+    if (score.homeTeam) {
+      teamIds.push(score.homeTeam.toString());
+    }
+
+    if (score.awayTeam) {
+      teamIds.push(score.awayTeam.toString());
+    }
+
+    // ==========================================
+    // 4. COLLECT PLAYER IDS
+    // ==========================================
+
+    const playerIds = [];
+
+    if (match) {
+      [
+        ...(match.homeStartingPlayers || []),
+        ...(match.homeSubstitutes || []),
+        ...(match.awayStartingPlayers || []),
+        ...(match.awaySubstitutes || []),
+      ].forEach((playerId) => {
+        if (playerId) {
+          playerIds.push(playerId.toString());
+        }
+      });
+    }
+
+    // ==========================================
+    // 5. GET TEAMS
+    // ==========================================
+
+    const uniqueTeamIds = [...new Set(teamIds)];
+
+    const [clubTeams, externalTeams] = await Promise.all([
+      Team.find({
+        _id: {
+          $in: uniqueTeamIds,
+        },
+      })
+        .select("_id name shortForm logoLow logoHigh")
+        .lean(),
+
+      OpponentTeam.find({
+        _id: {
+          $in: uniqueTeamIds,
+        },
+      })
+        .select("_id name shortForm logoLow logoHigh")
+        .lean(),
+    ]);
+
+    // ==========================================
+    // 6. GET PLAYERS
+    // ==========================================
+
+    const uniquePlayerIds = [...new Set(playerIds)];
+
+    const [clubPlayers, externalPlayers] = await Promise.all([
+      Player.find({
+        _id: {
+          $in: uniquePlayerIds,
+        },
+      })
+        .select("_id name jerseyNumber photo position")
+        .lean(),
+
+      OpponentPlayer.find({
+        _id: {
+          $in: uniquePlayerIds,
+        },
+      })
+        .select("_id name jerseyNumber photo position")
+        .lean(),
+    ]);
+
+    // ==========================================
+    // 7. CREATE LOOKUP MAPS
+    // ==========================================
+
+    const allTeams = [...clubTeams, ...externalTeams];
+    const allPlayers = [...clubPlayers, ...externalPlayers];
+
+    const teamMap = new Map(
+      allTeams.map((team) => [team._id.toString(), team]),
+    );
+
+    const playerMap = new Map(
+      allPlayers.map((player) => [player._id.toString(), player]),
+    );
+
+    // ==========================================
+    // 8. GET SCHEDULE
+    // ==========================================
+
+    let schedule = null;
+
+    if (match?.matchSchedule) {
+      schedule = await Schedule.findById(match.matchSchedule)
+        .select("_id date venue matchType")
+        .populate({
+          path: "venue",
+          select: "_id venue",
+        })
+        .lean();
+    }
+
+    // ==========================================
+    // 9. POPULATE TEAMS
+    // ==========================================
+
+    const homeTeam = score.homeTeam
+      ? teamMap.get(score.homeTeam.toString()) || null
+      : null;
+
+    const awayTeam = score.awayTeam
+      ? teamMap.get(score.awayTeam.toString()) || null
+      : null;
+
+    // ==========================================
+    // 10. POPULATE MATCH
+    // ==========================================
+
+    let populatedMatch = null;
+
+    if (match) {
+      populatedMatch = {
+        ...match,
+
+        matchSchedule: schedule,
+
+        homeStartingPlayers: (match.homeStartingPlayers || [])
+          .map((id) => playerMap.get(id.toString()))
+          .filter(Boolean),
+
+        homeSubstitutes: (match.homeSubstitutes || [])
+          .map((id) => playerMap.get(id.toString()))
+          .filter(Boolean),
+
+        awayStartingPlayers: (match.awayStartingPlayers || [])
+          .map((id) => playerMap.get(id.toString()))
+          .filter(Boolean),
+
+        awaySubstitutes: (match.awaySubstitutes || [])
+          .map((id) => playerMap.get(id.toString()))
+          .filter(Boolean),
+      };
+    }
+
+    // ==========================================
+    // 11. RESPONSE
+    // ==========================================
+
+    res.status(200).json({
+      success: true,
+      score: {
+        ...score,
+        homeTeam,
+        awayTeam,
+        match: populatedMatch,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching score:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch score",
+      error: error.message,
+    });
+  }
+};
+
+const getScoreDetails = async (req, res) => {
+  try {
+    // ==========================================
+    // 1. GET SCORE
+    // ==========================================
+
+    const { id } = req.params;
+
+    const score = await Score.findById(id).lean();
+
+    if (!score) {
+      return res.status(404).json({
+        success: false,
+        message: "Score not found",
+      });
+    }
+
+    // ==========================================
+    // 2. GET MATCH
+    // ==========================================
+
+    const match = score.match
+      ? await Match.findById(score.match)
+          .select(
+            "_id matchSchedule matchType matchTime playersPerTeam homeStartingPlayers homeSubstitutes awayStartingPlayers awaySubstitutes",
+          )
+          .lean()
+      : null;
+
+    if (!match) {
+      return res.status(404).json({
+        success: false,
+        message: "Match not found",
+      });
+    }
+
+    // ==========================================
+    // 3. GET SCHEDULE
+    // ==========================================
+
+    let schedule = null;
+
+    if (match.matchSchedule) {
+      schedule = await Schedule.findById(match.matchSchedule)
+        .select("_id date venue matchType")
+        .populate({
+          path: "venue",
+          select: "_id venue",
+        })
+        .lean();
+    }
+
+    // ==========================================
+    // 4. COLLECT PLAYER IDS
+    // ==========================================
+
+    const playerIds = [
+      ...(match.homeStartingPlayers || []),
+      ...(match.homeSubstitutes || []),
+      ...(match.awayStartingPlayers || []),
+      ...(match.awaySubstitutes || []),
+    ]
+      .map((player) => {
+        // If it's already populated
+        if (player && typeof player === "object" && player._id) {
+          return player._id.toString();
+        }
+
+        // If it's an ObjectId/string
+        if (player) {
+          return player.toString();
+        }
+
+        return null;
+      })
+      .filter(Boolean);
+
+    const uniquePlayerIds = [...new Set(playerIds)];
+
+    console.log("MATCH:", match._id.toString());
+    console.log("PLAYER IDS:", uniquePlayerIds);
+
+    // ==========================================
+    // 5. FIND PLAYERS
+    // ==========================================
+
+    const [clubPlayers, externalPlayers] = await Promise.all([
+      Player.find({
+        _id: {
+          $in: uniquePlayerIds,
+        },
+      })
+        .select("_id name jerseyNumber photo position")
+        .lean(),
+
+      OpponentPlayer.find({
+        _id: {
+          $in: uniquePlayerIds,
+        },
+      })
+        .select("_id name jerseyNumber photo position")
+        .lean(),
+    ]);
+
+    console.log("CLUB PLAYERS:", clubPlayers);
+    console.log("OPPONENT PLAYERS:", externalPlayers);
+
+    // ==========================================
+    // 6. CREATE PLAYER MAP
+    // ==========================================
+
+    const allPlayers = [...clubPlayers, ...externalPlayers];
+
+    const playerMap = new Map(
+      allPlayers.map((player) => [player._id.toString(), player]),
+    );
+
+    // ==========================================
+    // 7. POPULATE PLAYER ARRAY
+    // ==========================================
+
+    const populatePlayers = (players = []) => {
+      return players
+        .map((player) => {
+          const playerId =
+            player && typeof player === "object" && player._id
+              ? player._id.toString()
+              : player?.toString();
+
+          return playerId ? playerMap.get(playerId) : null;
+        })
+        .filter(Boolean);
+    };
+
+    // ==========================================
+    // 8. POPULATE MATCH
+    // ==========================================
+
+    const populatedMatch = {
+      ...match,
+
+      matchSchedule: schedule,
+
+      homeStartingPlayers: populatePlayers(match.homeStartingPlayers),
+
+      homeSubstitutes: populatePlayers(match.homeSubstitutes),
+
+      awayStartingPlayers: populatePlayers(match.awayStartingPlayers),
+
+      awaySubstitutes: populatePlayers(match.awaySubstitutes),
+    };
+
+    // ==========================================
+    // 9. GET TEAMS
+    // ==========================================
+
+    const teamIds = [score.homeTeam, score.awayTeam]
+      .filter(Boolean)
+      .map((id) => id.toString());
+
+    const uniqueTeamIds = [...new Set(teamIds)];
+
+    const [clubTeams, externalTeams] = await Promise.all([
+      Team.find({
+        _id: {
+          $in: uniqueTeamIds,
+        },
+      })
+        .select("_id name shortForm logoLow logoHigh")
+        .lean(),
+
+      OpponentTeam.find({
+        _id: {
+          $in: uniqueTeamIds,
+        },
+      })
+        .select("_id name shortForm logoLow logoHigh")
+        .lean(),
+    ]);
+
+    // ==========================================
+    // 10. CREATE TEAM MAP
+    // ==========================================
+
+    const allTeams = [...clubTeams, ...externalTeams];
+
+    const teamMap = new Map(
+      allTeams.map((team) => [team._id.toString(), team]),
+    );
+
+    const homeTeam = score.homeTeam
+      ? teamMap.get(score.homeTeam.toString()) || null
+      : null;
+
+    const awayTeam = score.awayTeam
+      ? teamMap.get(score.awayTeam.toString()) || null
+      : null;
+
+    // ==========================================
+    // 11. FINAL SCORE
+    // ==========================================
+
+    const finalScore = {
+      ...score,
+
+      homeTeam,
+
+      awayTeam,
+
+      match: populatedMatch,
+    };
+
+    // ==========================================
+    // 12. RESPONSE
+    // ==========================================
+
+    return res.status(200).json({
+      success: true,
+      score: finalScore,
+    });
+  } catch (error) {
+    console.error("Error fetching score details:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch score details",
+      error: error.message,
+    });
+  }
+};
+
+const updateScore = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { homeTeam, awayTeam, homeScore, awayScore, timer, matchEvents } =
+      req.body;
+
+    const score = await Score.findById(id);
+
+    if (!score) {
+      return res.status(404).json({
+        message: "Score not found",
+      });
+    }
+
+    if (homeTeam !== undefined) score.homeTeam = homeTeam;
+    if (awayTeam !== undefined) score.awayTeam = awayTeam;
+    if (homeScore !== undefined) score.homeScore = homeScore;
+    if (awayScore !== undefined) score.awayScore = awayScore;
+    if (timer !== undefined) score.timer = timer;
+    if (matchEvents !== undefined) score.matchEvents = matchEvents;
+
+    const updatedScore = await score.save();
+
+    return res.status(200).json({
+      message: "Match score updated successfully",
+      score: updatedScore,
+    });
+  } catch (error) {
+    console.error("Error updating match score:", error);
+
+    return res.status(500).json({
+      message: "Failed to update match score",
+      error: error.message,
+    });
+  }
+};
+
+export {
+  getScores,
+  getScoreById,
+  postScore,
+  getSimpleScores,
+  getScoreSummary,
+  updateScore,
+  getScoreDetails,
+};

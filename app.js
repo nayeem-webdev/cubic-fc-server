@@ -28,7 +28,15 @@ import {
   getOpponentPlayers,
   deleteOpponentPlayer,
 } from "./controllers/opponentController.js";
-import { getScores, postScore } from "./controllers/scoreController.js";
+import {
+  getScoreDetails,
+  getScoreById,
+  getScores,
+  getScoreSummary,
+  getSimpleScores,
+  postScore,
+  updateScore,
+} from "./controllers/scoreController.js";
 import {
   addTeams,
   getTeams,
@@ -168,6 +176,21 @@ app.post("/api/scores", postScore);
 
 // GET - Get all saved match scores
 app.get("/api/scores", getScores);
+
+// GET - Get all saved match scores
+app.get("/api/simple-scores", getSimpleScores);
+
+// GET - Get All saved match Summerized scores
+app.get("/api/scores/summary", getScoreSummary);
+
+// GET - Get all IDd saved match scores
+app.get("/api/scores/:id", getScoreById);
+
+// GET - Get all IDd saved match scores
+app.get("/api/scores/detailed/:id", getScoreDetails);
+
+// UPDATE - UPDATE all saved match scores
+app.patch("/api/scores/:id", updateScore);
 
 // ===============================
 // CONNECT TO MONGODB
