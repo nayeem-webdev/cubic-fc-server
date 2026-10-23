@@ -45,14 +45,125 @@ const addPlayer = async (req, res) => {
 };
 
 // GET ALL PLAYERS WITH TEAM
+// GET PLAYERS WITH APPEARANCES & LAST 5 MATCHES (Safe for players with 0 matches)
 const getPlayers = async (req, res) => {
   try {
-    const players = await Player.find()
-      .populate("playsFor", "_id name logoLow")
-      .sort({ createdAt: -1 })
-      .lean();
+    const [players, matches, scores] = await Promise.all([
+      Player.find()
+        .populate("playsFor", "_id name logoLow")
+        .sort({ createdAt: -1 })
+        .lean(),
 
-    return res.status(200).json(players);
+      Match.find()
+        .select(
+          "_id homeTeam awayTeam matchSchedule " +
+            "homeStartingPlayers homeSubstitutes " +
+            "awayStartingPlayers awaySubstitutes createdAt",
+        )
+        .populate("matchSchedule", "date time")
+        .sort({ createdAt: 1 })
+        .lean(),
+
+      Score.find().select("match homeScore awayScore").lean(),
+    ]);
+
+    const matchMap = new Map(matches.map((m) => [m._id.toString(), m]));
+
+    const getPlayerId = (player) => {
+      if (!player) return null;
+      return player._id ? player._id.toString() : player.toString();
+    };
+
+    // Initialize stats map for ALL players
+    const playerStats = new Map(
+      players.map((p) => [
+        p._id.toString(),
+        {
+          appearances: 0,
+          participatedMatches: [],
+          matchResults: [],
+        },
+      ]),
+    );
+
+    scores.forEach((score) => {
+      const matchId = score.match?.toString();
+      if (!matchId) return;
+
+      const match = matchMap.get(matchId);
+      if (!match) return;
+
+      const matchDate = match.createdAt || null;
+      const homeScore = Number(score.homeScore || 0);
+      const awayScore = Number(score.awayScore || 0);
+
+      let homeResult = "D";
+      let awayResult = "D";
+      if (homeScore > awayScore) {
+        homeResult = "W";
+        awayResult = "L";
+      } else if (homeScore < awayScore) {
+        homeResult = "L";
+        awayResult = "W";
+      }
+
+      const processTeam = (starting = [], subs = [], result) => {
+        const uniquePlayers = new Set([
+          ...starting.map(getPlayerId),
+          ...subs.map(getPlayerId),
+        ]);
+
+        uniquePlayers.forEach((playerId) => {
+          if (!playerId || !playerStats.has(playerId)) return;
+
+          const stats = playerStats.get(playerId);
+          stats.appearances += 1;
+          stats.participatedMatches.push(matchId);
+          stats.matchResults.push({
+            matchId,
+            date: matchDate,
+            result,
+          });
+        });
+      };
+
+      processTeam(match.homeStartingPlayers, match.homeSubstitutes, homeResult);
+      processTeam(match.awayStartingPlayers, match.awaySubstitutes, awayResult);
+    });
+
+    const completedMatches = [...matchMap.values()].sort(
+      (a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0),
+    );
+
+    const result = players.map((player) => {
+      const playerId = player._id.toString();
+      // Fallback object if player has no recorded matches
+      const stats = playerStats.get(playerId) || {
+        appearances: 0,
+        participatedMatches: [],
+        matchResults: [],
+      };
+
+      stats.matchResults.sort(
+        (a, b) => new Date(a.date || 0) - new Date(b.date || 0),
+      );
+
+      const participatedLast5 = completedMatches.slice(-5).map((match) => {
+        return stats.participatedMatches.includes(match._id.toString())
+          ? "P"
+          : "A";
+      });
+
+      return {
+        ...player,
+        stats: {
+          appearances: stats.appearances,
+          participatedLast5,
+        },
+      };
+    });
+
+    return res.status(200).json(result);
   } catch (error) {
     console.error("Get opponent players error:", error);
 
@@ -81,11 +192,15 @@ const getDetailedPlayers = async (req, res) => {
             "homeStartingPlayers homeSubstitutes " +
             "awayStartingPlayers awaySubstitutes createdAt",
         )
-        .sort({ createdAt: 1 })
         .lean(),
 
+      // IMPORTANT:
+      // We use Score.createdAt as the actual match completion/order date.
       Score.find()
-        .select("match homeTeam awayTeam homeScore awayScore matchEvents")
+        .select(
+          "match homeTeam awayTeam homeScore awayScore matchEvents createdAt",
+        )
+        .sort({ createdAt: 1 })
         .lean(),
     ]);
 
@@ -110,8 +225,6 @@ const getDetailedPlayers = async (req, res) => {
     const createPlayerStats = () => ({
       appearances: 0,
 
-      // Matches where the player was selected
-      // as starter OR substitute
       participatedMatches: [],
 
       goals: 0,
@@ -159,7 +272,17 @@ const getDetailedPlayers = async (req, res) => {
 
       if (!match) return;
 
-      const matchDate = match.createdAt || null;
+      // -----------------------------------------------------
+      // IMPORTANT
+      //
+      // Use Score.createdAt instead of:
+      // - Match.createdAt
+      // - Schedule.date
+      //
+      // This represents when the result was actually recorded.
+      // -----------------------------------------------------
+
+      const matchDate = score.createdAt || null;
 
       // -----------------------------------------------------
       // SCORE
@@ -249,37 +372,31 @@ const getDetailedPlayers = async (req, res) => {
         });
       };
 
-      // -----------------------------------------------------
+      // -------------------------------------------------------
       // HOME PLAYERS
-      // -----------------------------------------------------
+      // -------------------------------------------------------
 
       processTeamPlayers({
         startingPlayers: match.homeStartingPlayers || [],
-
         substitutes: match.homeSubstitutes || [],
-
         result: homeResult,
-
         opponentScore: awayScore,
       });
 
-      // -----------------------------------------------------
+      // -------------------------------------------------------
       // AWAY PLAYERS
-      // -----------------------------------------------------
+      // -------------------------------------------------------
 
       processTeamPlayers({
         startingPlayers: match.awayStartingPlayers || [],
-
         substitutes: match.awaySubstitutes || [],
-
         result: awayResult,
-
         opponentScore: homeScore,
       });
 
-      // -----------------------------------------------------
+      // -------------------------------------------------------
       // MATCH EVENTS
-      // -----------------------------------------------------
+      // -------------------------------------------------------
 
       (score.matchEvents || []).forEach((event) => {
         const scorerId = getPlayerId(event.scorer);
@@ -349,15 +466,7 @@ const getDetailedPlayers = async (req, res) => {
     });
 
     // -------------------------------------------------------
-    // 6. SORT ALL MATCHES CHRONOLOGICALLY
-    // -------------------------------------------------------
-
-    const completedMatches = [...matchMap.values()].sort(
-      (a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0),
-    );
-
-    // -------------------------------------------------------
-    // 7. BUILD PLAYER RESPONSE
+    // 6. BUILD PLAYER RESPONSE
     // -------------------------------------------------------
 
     const result = players.map((player) => {
@@ -366,24 +475,11 @@ const getDetailedPlayers = async (req, res) => {
       const stats = playerStats.get(playerId) || createPlayerStats();
 
       // -----------------------------------------------------
-      // SORT PLAYER MATCH RESULTS
+      // SORT MATCH RESULTS BY SCORE CREATED DATE
       // -----------------------------------------------------
 
-      stats.matchResults.sort(
-        (a, b) => new Date(a.date || 0) - new Date(b.date || 0),
-      );
-
-      // -----------------------------------------------------
-      // PARTICIPATED LAST 5
-      //
-      // P = player was in starting OR substitutes
-      // A = player was not selected
-      // -----------------------------------------------------
-
-      const participatedLast5 = completedMatches.slice(-5).map((match) => {
-        const matchId = match._id.toString();
-
-        return stats.participatedMatches.includes(matchId) ? "P" : "A";
+      stats.matchResults.sort((a, b) => {
+        return new Date(a.date || 0) - new Date(b.date || 0);
       });
 
       // -----------------------------------------------------
@@ -481,8 +577,6 @@ const getDetailedPlayers = async (req, res) => {
         stats: {
           appearances: stats.appearances,
 
-          participatedLast5,
-
           wins,
           draws,
           losses,
@@ -513,10 +607,11 @@ const getDetailedPlayers = async (req, res) => {
     });
 
     // -------------------------------------------------------
-    // 8. RANK PLAYERS
+    // 7. RANK PLAYERS
     // -------------------------------------------------------
 
     result.sort((a, b) => {
+      // First: average score
       const averageDifference =
         (b.stats.averageScore || 0) - (a.stats.averageScore || 0);
 
@@ -524,6 +619,7 @@ const getDetailedPlayers = async (req, res) => {
         return averageDifference;
       }
 
+      // Second: total player score
       const scoreDifference =
         (b.stats.playerScore || 0) - (a.stats.playerScore || 0);
 
@@ -531,11 +627,12 @@ const getDetailedPlayers = async (req, res) => {
         return scoreDifference;
       }
 
+      // Third: appearances
       return (b.stats.appearances || 0) - (a.stats.appearances || 0);
     });
 
     // -------------------------------------------------------
-    // 9. RESPONSE
+    // 8. RESPONSE
     // -------------------------------------------------------
 
     return res.status(200).json(result);
