@@ -836,9 +836,6 @@ const getScoreDetails = async (req, res) => {
 
     const uniquePlayerIds = [...new Set(playerIds)];
 
-    console.log("MATCH:", match._id.toString());
-    console.log("PLAYER IDS:", uniquePlayerIds);
-
     // ==========================================
     // 5. FIND PLAYERS
     // ==========================================
@@ -860,9 +857,6 @@ const getScoreDetails = async (req, res) => {
         .select("_id name jerseyNumber photo position")
         .lean(),
     ]);
-
-    console.log("CLUB PLAYERS:", clubPlayers);
-    console.log("OPPONENT PLAYERS:", externalPlayers);
 
     // ==========================================
     // 6. CREATE PLAYER MAP
