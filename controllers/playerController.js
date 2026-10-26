@@ -45,7 +45,6 @@ const addPlayer = async (req, res) => {
 };
 
 // GET ALL PLAYERS WITH TEAM
-// GET PLAYERS WITH APPEARANCES & LAST 5 MATCHES (Safe for players with 0 matches)
 const getPlayers = async (req, res) => {
   try {
     const [players, matches, scores] = await Promise.all([
@@ -672,6 +671,73 @@ const updatePlayer = async (req, res) => {
   }
 };
 
+const bulkUpdatePlayers = async (req, res) => {
+  try {
+    const { players } = req.body;
+
+    if (!Array.isArray(players) || players.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Players array is required",
+      });
+    }
+
+    const allowedStatuses = ["active", "inactive", "retired"];
+
+    const operations = players.map((player) => {
+      const { _id, status, playsFor } = player;
+
+      if (!_id) {
+        throw new Error("Player _id is required");
+      }
+
+      const update = {};
+
+      // Only update status if provided
+      if (status !== undefined) {
+        if (!allowedStatuses.includes(status)) {
+          throw new Error(`Invalid status for player ${_id}`);
+        }
+
+        update.status = status;
+      }
+
+      // Only update playsFor if provided
+      if (playsFor !== undefined) {
+        update.playsFor = playsFor;
+      }
+
+      // Do not create empty updates
+      if (Object.keys(update).length === 0) {
+        throw new Error(`No fields to update for player ${_id}`);
+      }
+
+      return {
+        updateOne: {
+          filter: { _id },
+          update: { $set: update },
+        },
+      };
+    });
+
+    const result = await Player.bulkWrite(operations);
+
+    return res.status(200).json({
+      success: true,
+      message: "Players updated successfully",
+      matchedCount: result.matchedCount,
+      modifiedCount: result.modifiedCount,
+    });
+  } catch (error) {
+    console.error("Bulk update players error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to bulk update players",
+    });
+  }
+};
+
 const deletePlayer = async (req, res) => {
   try {
     const player = await Player.findByIdAndDelete(req.params.id);
@@ -689,6 +755,7 @@ const deletePlayer = async (req, res) => {
 
 export {
   updatePlayer,
+  bulkUpdatePlayers,
   getDetailedPlayers,
   addPlayer,
   getPlayers,

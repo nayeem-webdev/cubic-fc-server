@@ -8,6 +8,7 @@ import { adminLogin } from "./controllers/authController.js";
 import {
   addMatch,
   deleteMatch,
+  getAllMatches,
   getSingleMatch,
   getUpcomingMatches,
   patchMatch,
@@ -18,6 +19,7 @@ import {
   getDetailedPlayers,
   updatePlayer,
   deletePlayer,
+  bulkUpdatePlayers,
 } from "./controllers/playerController.js";
 import {
   getOpponentTeams,
@@ -77,6 +79,9 @@ app.get("/api/players", getPlayers);
 
 // GET - Get All Players with Details
 app.get("/api/player-details", getDetailedPlayers);
+
+// UPDATE - Update Bulk Player
+app.patch("/api/players/bulk-update", bulkUpdatePlayers);
 
 // UPDATE - Update Player
 app.patch("/api/players/:id", updatePlayer);
@@ -157,6 +162,9 @@ app.post("/api/matches", addMatch);
 
 // GET - All Upcoming Matches
 app.get("/api/matches", getUpcomingMatches);
+
+// GET - All Upcoming Matches
+app.get("/api/all-matches", getAllMatches);
 
 // DELETE - Delete a Matches
 app.delete("/api/matches/:id", deleteMatch);

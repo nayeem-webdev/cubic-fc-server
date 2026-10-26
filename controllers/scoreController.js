@@ -315,7 +315,7 @@ const getScores = async (req, res) => {
 const getScoreSummary = async (req, res) => {
   try {
     const page = Math.max(Number(req.query.page) || 1, 1);
-    const limit = 5;
+    const limit = 6;
     const skip = (page - 1) * limit;
 
     // ==========================================

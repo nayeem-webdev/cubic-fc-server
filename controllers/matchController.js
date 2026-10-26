@@ -1,10 +1,12 @@
 import Match from "../models/Match.js";
 
+// ============================================================
+// ADD MATCH
+// ============================================================
+
 const addMatch = async (req, res) => {
-  // POST - Add a new Match
   try {
     const match = new Match(req.body);
-
     const savedMatch = await match.save();
 
     res.status(201).json({
@@ -21,11 +23,15 @@ const addMatch = async (req, res) => {
   }
 };
 
+// ============================================================
+// GET UPCOMING MATCHES
+// ============================================================
+
 const getUpcomingMatches = async (req, res) => {
   try {
     const now = new Date();
 
-    // Calculate yesterday's date in Asia/Dhaka time zone
+    // Yesterday's date in Asia/Dhaka
     const yesterday = new Intl.DateTimeFormat("en-CA", {
       timeZone: "Asia/Dhaka",
     }).format(new Date(now.getTime() - 24 * 60 * 60 * 1000));
@@ -37,23 +43,31 @@ const getUpcomingMatches = async (req, res) => {
     const OpponentTeam = Match.db.model("OpponentTeam");
     const OpponentPlayer = Match.db.model("OpponentPlayer");
 
+    // ----------------------------------------------------------
     // Get schedules from yesterday onwards
+    // ----------------------------------------------------------
+
     const scheduleIds = await Schedule.find({
       date: {
         $gte: yesterday,
       },
     }).distinct("_id");
 
+    // ----------------------------------------------------------
     // Get matches
+    // ----------------------------------------------------------
+
     const matches = await Match.find({
       matchSchedule: {
         $in: scheduleIds,
       },
     }).lean();
 
-    // Get all IDs used by matches
-    const teamIds = [];
+    // ----------------------------------------------------------
+    // Collect IDs
+    // ----------------------------------------------------------
 
+    const teamIds = [];
     const playerIds = [];
 
     matches.forEach((match) => {
@@ -70,12 +84,14 @@ const getUpcomingMatches = async (req, res) => {
       });
     });
 
-    // Remove duplicate IDs
     const uniqueTeamIds = [...new Set(teamIds.map((id) => id.toString()))];
 
     const uniquePlayerIds = [...new Set(playerIds.map((id) => id.toString()))];
 
-    // Fetch teams from BOTH collections
+    // ----------------------------------------------------------
+    // Fetch teams
+    // ----------------------------------------------------------
+
     const [teams, opponentTeams] = await Promise.all([
       Team.find({
         _id: {
@@ -90,7 +106,10 @@ const getUpcomingMatches = async (req, res) => {
       }).select("_id name logoLow"),
     ]);
 
-    // Fetch players from BOTH collections
+    // ----------------------------------------------------------
+    // Fetch players
+    // ----------------------------------------------------------
+
     const [players, opponentPlayers] = await Promise.all([
       Player.find({
         _id: {
@@ -105,20 +124,25 @@ const getUpcomingMatches = async (req, res) => {
       }).select("_id name photo jerseyNumber position"),
     ]);
 
-    // Combine them
-    const allTeams = [...teams, ...opponentTeams];
-    const allPlayers = [...players, ...opponentPlayers];
+    // ----------------------------------------------------------
+    // Create lookup maps
+    // ----------------------------------------------------------
 
-    // Create quick lookup maps
     const teamMap = new Map(
-      allTeams.map((team) => [team._id.toString(), team]),
+      [...teams, ...opponentTeams].map((team) => [team._id.toString(), team]),
     );
 
     const playerMap = new Map(
-      allPlayers.map((player) => [player._id.toString(), player]),
+      [...players, ...opponentPlayers].map((player) => [
+        player._id.toString(),
+        player,
+      ]),
     );
 
-    // Populate schedule information
+    // ----------------------------------------------------------
+    // Populate schedules
+    // ----------------------------------------------------------
+
     const populatedMatches = await Match.populate(matches, {
       path: "matchSchedule",
       select: "_id venue date time matchFormat matchType",
@@ -128,14 +152,15 @@ const getUpcomingMatches = async (req, res) => {
       },
     });
 
-    // Manually populate teams and players
+    // ----------------------------------------------------------
+    // Populate teams and players
+    // ----------------------------------------------------------
+
     populatedMatches.forEach((match) => {
-      // Teams
       match.homeTeam = teamMap.get(match.homeTeam?.toString()) || null;
 
       match.awayTeam = teamMap.get(match.awayTeam?.toString()) || null;
 
-      // Players
       match.homeStartingPlayers = (match.homeStartingPlayers || [])
         .map((id) => playerMap.get(id.toString()))
         .filter(Boolean);
@@ -153,17 +178,15 @@ const getUpcomingMatches = async (req, res) => {
         .filter(Boolean);
     });
 
-    // Sort by schedule date/time
+    // ----------------------------------------------------------
+    // Sort by date only
+    // Oldest → latest
+    // ----------------------------------------------------------
+
     populatedMatches.sort((a, b) => {
-      const dateA = new Date(
-        `${a.matchSchedule?.date}T${a.matchSchedule?.time || "00:00"}`,
+      return (a.matchSchedule?.date || "").localeCompare(
+        b.matchSchedule?.date || "",
       );
-
-      const dateB = new Date(
-        `${b.matchSchedule?.date}T${b.matchSchedule?.time || "00:00"}`,
-      );
-
-      return dateA - dateB;
     });
 
     res.json({
@@ -182,20 +205,227 @@ const getUpcomingMatches = async (req, res) => {
   }
 };
 
-// GET - Get one match by ID with populated teams, schedule and players
+// ============================================================
+// GET ALL MATCHES - PAGINATED
+// ============================================================
+
+const getAllMatches = async (req, res) => {
+  try {
+    // ----------------------------------------------------------
+    // Pagination
+    // ----------------------------------------------------------
+
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+
+    const limit = 6;
+    const skip = (page - 1) * limit;
+
+    // ----------------------------------------------------------
+    // Models
+    // ----------------------------------------------------------
+
+    const Schedule = Match.db.model("Schedule");
+    const Team = Match.db.model("Team");
+    const OpponentTeam = Match.db.model("OpponentTeam");
+
+    // ----------------------------------------------------------
+    // Get matches
+    // No player/substitute data needed here
+    // ----------------------------------------------------------
+
+    const matches = await Match.find()
+      .select(
+        "_id homeTeam awayTeam matchTime matchSchedule createdAt updatedAt",
+      )
+      .lean();
+
+    // ----------------------------------------------------------
+    // No matches
+    // ----------------------------------------------------------
+
+    if (!matches.length) {
+      return res.json({
+        success: true,
+
+        pagination: {
+          page,
+          limit,
+          totalMatches: 0,
+          totalPages: 0,
+          hasNextPage: false,
+          hasPreviousPage: false,
+        },
+
+        count: 0,
+        matches: [],
+      });
+    }
+
+    // ----------------------------------------------------------
+    // Get schedule IDs
+    // ----------------------------------------------------------
+
+    const scheduleIds = [
+      ...new Set(
+        matches.map((match) => match.matchSchedule?.toString()).filter(Boolean),
+      ),
+    ];
+
+    // ----------------------------------------------------------
+    // Get schedules
+    // ----------------------------------------------------------
+
+    const schedules = await Schedule.find({
+      _id: {
+        $in: scheduleIds,
+      },
+    })
+      .select("_id venue date time matchFormat matchType")
+      .populate({
+        path: "venue",
+        select: "_id venue",
+      })
+      .lean();
+
+    // ----------------------------------------------------------
+    // Schedule lookup map
+    // ----------------------------------------------------------
+
+    const scheduleMap = new Map(
+      schedules.map((schedule) => [schedule._id.toString(), schedule]),
+    );
+
+    // ----------------------------------------------------------
+    // Get team IDs
+    // ----------------------------------------------------------
+
+    const teamIds = [];
+
+    matches.forEach((match) => {
+      if (match.homeTeam) {
+        teamIds.push(match.homeTeam);
+      }
+
+      if (match.awayTeam) {
+        teamIds.push(match.awayTeam);
+      }
+    });
+
+    const uniqueTeamIds = [...new Set(teamIds.map((id) => id.toString()))];
+
+    // ----------------------------------------------------------
+    // Fetch teams from both collections
+    // ----------------------------------------------------------
+
+    const [teams, opponentTeams] = await Promise.all([
+      Team.find({
+        _id: {
+          $in: uniqueTeamIds,
+        },
+      })
+        .select("_id name logoLow")
+        .lean(),
+
+      OpponentTeam.find({
+        _id: {
+          $in: uniqueTeamIds,
+        },
+      })
+        .select("_id name logoLow")
+        .lean(),
+    ]);
+
+    // ----------------------------------------------------------
+    // Team lookup map
+    // ----------------------------------------------------------
+
+    const teamMap = new Map(
+      [...teams, ...opponentTeams].map((team) => [team._id.toString(), team]),
+    );
+
+    // ----------------------------------------------------------
+    // Attach schedule + teams
+    // ----------------------------------------------------------
+
+    const populatedMatches = matches.map((match) => ({
+      ...match,
+
+      matchSchedule: scheduleMap.get(match.matchSchedule?.toString()) || null,
+
+      homeTeam: teamMap.get(match.homeTeam?.toString()) || null,
+
+      awayTeam: teamMap.get(match.awayTeam?.toString()) || null,
+    }));
+
+    // ----------------------------------------------------------
+    // Sort by DATE ONLY
+    // Latest → oldest
+    //
+    // Time is completely ignored.
+    // ----------------------------------------------------------
+
+    populatedMatches.sort((a, b) => {
+      return (b.matchSchedule?.date || "").localeCompare(
+        a.matchSchedule?.date || "",
+      );
+    });
+
+    // ----------------------------------------------------------
+    // Pagination
+    // ----------------------------------------------------------
+
+    const totalMatches = populatedMatches.length;
+    const totalPages = Math.ceil(totalMatches / limit);
+
+    const paginatedMatches = populatedMatches.slice(skip, skip + limit);
+
+    // ----------------------------------------------------------
+    // Response
+    // ----------------------------------------------------------
+
+    return res.json({
+      success: true,
+
+      pagination: {
+        page,
+        limit,
+        totalMatches,
+        totalPages,
+
+        hasNextPage: page < totalPages,
+        hasPreviousPage: page > 1,
+      },
+
+      count: paginatedMatches.length,
+      matches: paginatedMatches,
+    });
+  } catch (error) {
+    console.error("Error fetching matches:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch matches",
+      error: error.message,
+    });
+  }
+};
+
+// ============================================================
+// GET SINGLE MATCH
+// ============================================================
 
 const getSingleMatch = async (req, res) => {
   try {
-    // Get models
     const Team = Match.db.model("Team");
     const OpponentTeam = Match.db.model("OpponentTeam");
     const Player = Match.db.model("Player");
     const OpponentPlayer = Match.db.model("OpponentPlayer");
-
     const Schedule = Match.db.model("Schedule");
-    const Venue = Match.db.model("Venue");
 
-    // Fetch match without populating teams or players
+    // ----------------------------------------------------------
+    // Get match
+    // ----------------------------------------------------------
+
     const match = await Match.findById(req.params.id).lean();
 
     if (!match) {
@@ -205,12 +435,18 @@ const getSingleMatch = async (req, res) => {
       });
     }
 
+    // ----------------------------------------------------------
     // Collect team IDs
+    // ----------------------------------------------------------
+
     const teamIds = [match.homeTeam, match.awayTeam]
       .filter(Boolean)
       .map((id) => id.toString());
 
+    // ----------------------------------------------------------
     // Collect player IDs
+    // ----------------------------------------------------------
+
     const playerIds = [
       ...(match.homeStartingPlayers || []),
       ...(match.homeSubstitutes || []),
@@ -220,29 +456,54 @@ const getSingleMatch = async (req, res) => {
       .filter(Boolean)
       .map((id) => id.toString());
 
-    // Fetch club and opponent teams
+    // ----------------------------------------------------------
+    // Fetch teams
+    // ----------------------------------------------------------
+
     const [clubTeams, opponentTeams] = await Promise.all([
-      Team.find({ _id: { $in: teamIds } })
+      Team.find({
+        _id: {
+          $in: teamIds,
+        },
+      })
         .select("_id name shortForm logoLow logoHigh")
         .lean(),
 
-      OpponentTeam.find({ _id: { $in: teamIds } })
+      OpponentTeam.find({
+        _id: {
+          $in: teamIds,
+        },
+      })
         .select("_id name shortForm logoLow logoHigh")
         .lean(),
     ]);
 
-    // Fetch club and opponent players
+    // ----------------------------------------------------------
+    // Fetch players
+    // ----------------------------------------------------------
+
     const [clubPlayers, opponentPlayers] = await Promise.all([
-      Player.find({ _id: { $in: playerIds } })
+      Player.find({
+        _id: {
+          $in: playerIds,
+        },
+      })
         .select("_id name jerseyNumber photo position foot playsFor")
         .lean(),
 
-      OpponentPlayer.find({ _id: { $in: playerIds } })
+      OpponentPlayer.find({
+        _id: {
+          $in: playerIds,
+        },
+      })
         .select("_id name jerseyNumber photo position playsFor")
         .lean(),
     ]);
 
-    // Create lookup maps
+    // ----------------------------------------------------------
+    // Lookup maps
+    // ----------------------------------------------------------
+
     const teamMap = new Map(
       [...clubTeams, ...opponentTeams].map((team) => [
         team._id.toString(),
@@ -257,7 +518,10 @@ const getSingleMatch = async (req, res) => {
       ]),
     );
 
-    // Populate schedule and venue
+    // ----------------------------------------------------------
+    // Populate schedule
+    // ----------------------------------------------------------
+
     let populatedSchedule = null;
 
     if (match.matchSchedule) {
@@ -269,7 +533,10 @@ const getSingleMatch = async (req, res) => {
         .lean();
     }
 
-    // Return populated match
+    // ----------------------------------------------------------
+    // Build response
+    // ----------------------------------------------------------
+
     const populatedMatch = {
       ...match,
 
@@ -315,8 +582,11 @@ const getSingleMatch = async (req, res) => {
   }
 };
 
+// ============================================================
+// DELETE MATCH
+// ============================================================
+
 const deleteMatch = async (req, res) => {
-  // DELETE - Delete a Match
   try {
     const deletedMatch = await Match.findByIdAndDelete(req.params.id);
 
@@ -340,6 +610,10 @@ const deleteMatch = async (req, res) => {
   }
 };
 
+// ============================================================
+// PATCH MATCH
+// ============================================================
+
 const patchMatch = async (req, res) => {
   try {
     const {
@@ -353,7 +627,10 @@ const patchMatch = async (req, res) => {
       awaySubstitutes,
     } = req.body;
 
+    // ----------------------------------------------------------
     // Find existing match
+    // ----------------------------------------------------------
+
     const existingMatch = await Match.findById(req.params.id);
 
     if (!existingMatch) {
@@ -362,25 +639,44 @@ const patchMatch = async (req, res) => {
       });
     }
 
-    // Basic validation
+    // ----------------------------------------------------------
+    // Validate teams
+    // ----------------------------------------------------------
+
     if (homeTeam && awayTeam && homeTeam === awayTeam) {
       return res.status(400).json({
         message: "Home team and away team cannot be the same",
       });
     }
 
-    // Helper to remove empty values and duplicate IDs
+    // ----------------------------------------------------------
+    // Clean player IDs
+    // ----------------------------------------------------------
+
     const cleanPlayerIds = (players) => {
       if (!Array.isArray(players)) return undefined;
 
       return [...new Set(players.filter(Boolean).map(String))];
     };
 
+    // ----------------------------------------------------------
+    // Build update data
+    // ----------------------------------------------------------
+
     const updateData = {};
 
-    if (homeTeam !== undefined) updateData.homeTeam = homeTeam;
-    if (awayTeam !== undefined) updateData.awayTeam = awayTeam;
-    if (matchTime !== undefined) updateData.matchTime = matchTime;
+    if (homeTeam !== undefined) {
+      updateData.homeTeam = homeTeam;
+    }
+
+    if (awayTeam !== undefined) {
+      updateData.awayTeam = awayTeam;
+    }
+
+    if (matchTime !== undefined) {
+      updateData.matchTime = matchTime;
+    }
+
     if (matchSchedule !== undefined) {
       updateData.matchSchedule = matchSchedule;
     }
@@ -401,7 +697,10 @@ const patchMatch = async (req, res) => {
       updateData.awaySubstitutes = cleanPlayerIds(awaySubstitutes);
     }
 
-    // Prevent the same player from appearing in both starting and substitutes
+    // ----------------------------------------------------------
+    // Validate squad overlap
+    // ----------------------------------------------------------
+
     const validateSquad = (starting, substitutes, teamName) => {
       if (!starting || !substitutes) return null;
 
@@ -444,6 +743,10 @@ const patchMatch = async (req, res) => {
       });
     }
 
+    // ----------------------------------------------------------
+    // Update match
+    // ----------------------------------------------------------
+
     const updatedMatch = await Match.findByIdAndUpdate(
       req.params.id,
       updateData,
@@ -474,9 +777,14 @@ const patchMatch = async (req, res) => {
   }
 };
 
+// ============================================================
+// EXPORTS
+// ============================================================
+
 export {
   addMatch,
   getUpcomingMatches,
+  getAllMatches,
   getSingleMatch,
   patchMatch,
   deleteMatch,
