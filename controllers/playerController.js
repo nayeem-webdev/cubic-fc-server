@@ -682,7 +682,7 @@ const bulkUpdatePlayers = async (req, res) => {
       });
     }
 
-    const allowedStatuses = ["active", "inactive", "retired"];
+    const allowedStatuses = ["active", "inactive", "retired", "backup"];
 
     const operations = players.map((player) => {
       const { _id, status, playsFor } = player;
