@@ -1,5 +1,7 @@
 import Team from "../models/Team.js";
 import Player from "../models/Player.js";
+import OpponentTeam from "../models/OpponentTeam.js";
+import OpponentPlayer from "../models/OpponentPlayer.js";
 import Score from "../models/Score.js";
 
 const addTeams = async (req, res) => {
@@ -118,4 +120,46 @@ const getTeamsDetails = async (req, res) => {
   }
 };
 
-export { getTeams, addTeams, getTeamsDetails };
+const getTeamsWithPlayers = async (req, res) => {
+  try {
+    const [teams, players, opponentTeams, opponentPlayers] = await Promise.all([
+      Team.find({
+        name: { $not: /^NO CLUB$/i },
+      }).lean(),
+
+      Player.find().lean(),
+
+      OpponentTeam.find({
+        name: { $not: /^NO CLUB$/i },
+      }).lean(),
+
+      OpponentPlayer.find().lean(),
+    ]);
+
+    const attachPlayers = (teamList, playerList) => {
+      return teamList.map((team) => ({
+        ...team,
+        players: playerList.filter(
+          (player) =>
+            String(player.playsFor?._id || player.playsFor) ===
+            String(team._id),
+        ),
+      }));
+    };
+
+    return res.status(200).json({
+      success: true,
+      teams: attachPlayers(teams, players),
+      opponentTeams: attachPlayers(opponentTeams, opponentPlayers),
+    });
+  } catch (error) {
+    console.error("Error fetching teams with players:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch teams and players",
+    });
+  }
+};
+
+export { getTeams, addTeams, getTeamsDetails, getTeamsWithPlayers };

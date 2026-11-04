@@ -43,6 +43,7 @@ import {
   addTeams,
   getTeams,
   getTeamsDetails,
+  getTeamsWithPlayers,
 } from "./controllers/teamController.js";
 import {
   createSchedule,
@@ -101,6 +102,8 @@ app.get("/api/teams", getTeams);
 
 // GET - Teams, stats
 app.get("/api/teams-details", getTeamsDetails);
+
+app.get("/api/teams-with-players", getTeamsWithPlayers);
 
 // ===============================
 // OPPONENT PLAYER API
