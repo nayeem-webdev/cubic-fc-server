@@ -351,7 +351,7 @@ const getScoreSummary = async (req, res) => {
     const matches = await Match.find({
       _id: { $in: matchIds },
     })
-      .select("_id matchSchedule matchType matchTime")
+      .select("_id matchSchedule matchTime")
       .lean();
 
     const matchMap = new Map(
@@ -447,7 +447,9 @@ const getScoreSummary = async (req, res) => {
       return {
         _id: score._id,
 
-        matchType: match?.matchType || "training",
+        // Get matchType from Schedule
+        matchType: schedule?.matchType || "training",
+
         matchTime: match?.matchTime || null,
 
         homeScore: score.homeScore,
